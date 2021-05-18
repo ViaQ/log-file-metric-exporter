@@ -25,7 +25,8 @@ TEST_OPTIONS?=
 
 
 
-all: build
+all: fmt build image deploy-image
+.PHONY: all
 
 artifactdir:
 	@mkdir -p $(ARTIFACT_DIR)

@@ -9,7 +9,7 @@ ENV http=:2112
 WORKDIR  /go/src/github.com/log-file-metric-exporter
 COPY ${REMOTE_SOURCE} .
 
-RUN make
+RUN make build
 
 #@follow_tag(openshift-ose-base:ubi8)
 FROM registry.ci.openshift.org/ocp/4.7:base
