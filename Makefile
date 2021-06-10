@@ -23,14 +23,51 @@ CACHE_EXPIRY ?= "5s"
 PKGS=$(shell go list ./... | grep -v -E '/vendor/')
 TEST_OPTIONS?=
 
-build: 
-	echo "Build....."
+
+
+all: fmt build image deploy-image
+.PHONY: all
+
+artifactdir:
+	@mkdir -p $(ARTIFACT_DIR)
+
+
+fmt:
+	@gofmt -l -w cmd && \
+	gofmt -l -w pkg
+.PHONY: fmt
+
+build: fmt
+	go build $(LDFLAGS) -o $(TARGET) $(MAIN_PKG)
 .PHONY: build
 
+vendor:
+	go mod vendor
+.PHONY: vendor
+
 image:
-	docker build -f Dockerfile -t $(LOCAL_IMAGE_TAG) .
+	podman build -f Dockerfile -t $(LOCAL_IMAGE_TAG) .
 .PHONY: image
 
-test: 
-	echo "Testing...."
+deploy-image: image
+	IMAGE_TAG=$(LOCAL_IMAGE_TAG) hack/deploy-image.sh
+.PHONY: deploy-image
+
+clean:
+	rm -rf $(TARGET_DIR)
+.PHONY: clean
+
+COVERAGE_DIR=$(ARTIFACT_DIR)/coverage
+test: artifactdir
+	@mkdir -p $(COVERAGE_DIR)
+	@go test -race -coverprofile=$(COVERAGE_DIR)/test-unit.cov ./pkg/...
+	@go tool cover -html=$(COVERAGE_DIR)/test-unit.cov -o $(COVERAGE_DIR)/test-unit-coverage.html
+	@go tool cover -func=$(COVERAGE_DIR)/test-unit.cov | tail -n 1
 .PHONY: test
+
+lint:
+	@hack/run-linter
+.PHONY: lint
+gen-dockerfiles:
+	./hack/generate-dockerfile-from-midstream > Dockerfile
+.PHONY: gen-dockerfiles
