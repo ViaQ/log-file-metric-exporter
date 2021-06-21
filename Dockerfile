@@ -18,8 +18,11 @@ RUN make build
 
 #@follow_tag(openshift-ose-base:ubi8)
 FROM registry.ci.openshift.org/ocp/4.7:base
-COPY --from=builder /go/src/github.com/log-file-metric-exporter/bin/log-file-metric-exporter  /usr/local/bin/
-COPY --from=builder /go/src/github.com/log-file-metric-exporter/hack/log-file-metric-exporter.sh  /usr/local/bin/
+COPY --from=builder /go/src/github.com/log-file-metric-exporter/bin/log-file-metric-exporter  /usr/local/bin/.
+COPY --from=builder /go/src/github.com/log-file-metric-exporter/hack/log-file-metric-exporter.sh  /usr/local/bin/.
+
+RUN chmod +x /usr/local/bin/log-file-metric-exporter
+RUN chmod +x /usr/local/bin/log-file-metric-exporter.sh
 
 LABEL \
         io.k8s.display-name="OpenShift LogFileMetric Exporter" \
@@ -33,4 +36,5 @@ LABEL \
         io.openshift.build.commit.url=${CI_LOGFILEMETRIC_EXPORTER_UPSTREAM_URL}/commit/${CI_LOGFILEMETRIC_EXPORTER_UPSTREAM_COMMIT} \
         version=${CI_CONTAINER_VERSION}
 
-CMD ["sh", "/usr/bin/local/log-file-metric-exporter.sh"]
+CMD ["sh", "-c", "/usr/local/bin/log-file-metric-exporter.sh"]
+
