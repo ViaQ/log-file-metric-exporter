@@ -106,6 +106,8 @@ func (w *FileWatcher) Watch() {
 func main() {
 	var dir string
 	var addr string
+	var crtFile string
+	var keyFile string
 
 	//directory to be watched out where symlinks to all logs files are present e.g. /var/log/containers/
 	//debug option true or false
@@ -113,11 +115,14 @@ func main() {
 	flag.StringVar(&dir, "dir", "/var/log/containers/", "Directory containing log files")
 	flag.IntVar(&verbosity, "verbosity", 0, "set verbosity level")
 	flag.StringVar(&addr, "http", ":2112", "HTTP service address where metrics are exposed")
+	flag.StringVar(&crtFile, "crtFile", "/etc/fluent/metrics/tls.crt", "cert file for log-file-metric-exporter service")
+	flag.StringVar(&keyFile, "keyFile", "/etc/fluent/metrics/tls.key", "key file for log-file-metric-exporter service")
 	flag.Parse()
 
 	log.SetLogLevel(verbosity)
 
 	log.V(2).Info("Watching out logfiles dir ...", "dir", dir, "http", addr)
+	log.V(2).Info("Crt and Key taken from...", crtFile, keyFile)
 
 	//Get new watcher
 	symwatcher, err := symnotify.NewWatcher()
@@ -149,7 +154,7 @@ func main() {
 
 	go w.Watch()
 	http.Handle("/metrics", promhttp.Handler())
-	errh := http.ListenAndServe(addr, nil)
+	errh := http.ListenAndServeTLS(addr, crtFile, keyFile, nil)
 	if errh != nil {
 		log.Error(errh, "Error in http.ListenAndServei call")
 	}
