@@ -58,7 +58,7 @@ func (w *FileWatcher) Update(path string, namespace string, podname string, cont
 		// File truncated, starting over. Add the size.
 		add = size
 	}
-	log.V(2).Info("For logfile in...", "path", path, "lastsize", lastSize, "currentsize", size, "addedbytes", add)
+	log.V(3).Info("For logfile in...", "path", path, "lastsize", lastSize, "currentsize", size, "addedbytes", add)
 	counter.Add(add)
 	return nil
 }
@@ -78,7 +78,7 @@ func (w *FileWatcher) Watch() {
 			os.Exit(1)
 		}
 
-		log.V(2).Info("Events notified for...", "e.Name", e.Name, "Event", e.Op)
+		log.V(3).Info("Events notified for...", "e.Name", e.Name, "Event", e.Op)
 
 		//Get namespace, podname, containername from e.Name - log file path
 
@@ -92,7 +92,7 @@ func (w *FileWatcher) Watch() {
 			namespace := r2[NamespaceIndex]
 			containername := r2[ContainerNameIndex]
 			dockerid := r2[DockerIndex]
-			log.V(2).Info("Namespace podname containername...", "namespace", namespace, "podname", podname, "containername", containername, "dockerid", dockerid)
+			log.V(3).Info("Namespace podname containername...", "namespace", namespace, "podname", podname, "containername", containername, "dockerid", dockerid)
 
 			err := w.Update(e.Name, namespace, podname, containername)
 			if err != nil {
