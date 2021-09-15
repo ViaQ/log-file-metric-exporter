@@ -1,11 +1,11 @@
 ### This is a generated file from Dockerfile.in ###
-#@follow_tag(openshift-golang-builder:1.14)
+#@follow_tag(openshift-golang-builder:1.15)
 FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.7 AS builder
 
-ENV BUILD_VERSION=${CI_CONTAINER_VERSION}
-ENV OS_GIT_MAJOR=${CI_X_VERSION}
-ENV OS_GIT_MINOR=${CI_Y_VERSION}
-ENV OS_GIT_PATCH=${CI_Z_VERSION}
+ENV BUILD_VERSION=1.0.0
+ENV OS_GIT_MAJOR=1
+ENV OS_GIT_MINOR=0
+ENV OS_GIT_PATCH=0
 ENV SOURCE_GIT_COMMIT=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_COMMIT}
 ENV SOURCE_GIT_URL=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_URL}
 ENV REMOTE_SOURCE=${REMOTE_SOURCE:-.}
@@ -13,7 +13,6 @@ ENV REMOTE_SOURCE=${REMOTE_SOURCE:-.}
 
 WORKDIR  /go/src/github.com/log-file-metric-exporter
 COPY ${REMOTE_SOURCE} .
-ADD ${REMOTE_SOURCE}/Makefile .
 
 RUN make build
 
@@ -28,14 +27,14 @@ RUN chmod +x /usr/local/bin/log-file-metric-exporter.sh
 LABEL \
         io.k8s.display-name="OpenShift LogFileMetric Exporter" \
         io.k8s.description="OpenShift LogFileMetric Exporter component of OpenShift Cluster Logging" \
-        name="openshift/log-file-metric-exporter" \
+        name="openshift-logging/log-file-metric-exporter-rhel8" \
         com.redhat.component="log-file-metric-exporter-container" \
         io.openshift.maintainer.product="OpenShift Container Platform" \
         io.openshift.maintainer.component="Logging" \
         io.openshift.build.commit.id=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_COMMIT} \
         io.openshift.build.source-location=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_URL} \
         io.openshift.build.commit.url=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_URL}/commit/${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_COMMIT} \
-        version=${CI_CONTAINER_VERSION}
+        version=v1.0.0
 
 CMD ["sh", "-c", "/usr/local/bin/log-file-metric-exporter.sh"]
 
