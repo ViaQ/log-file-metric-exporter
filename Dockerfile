@@ -27,6 +27,7 @@ RUN chmod +x /usr/local/bin/log-file-metric-exporter.sh
 LABEL \
         io.k8s.display-name="OpenShift LogFileMetric Exporter" \
         io.k8s.description="OpenShift LogFileMetric Exporter component of OpenShift Cluster Logging" \
+        License="Apache-2.0" \
         name="openshift-logging/log-file-metric-exporter-rhel8" \
         com.redhat.component="log-file-metric-exporter-container" \
         io.openshift.maintainer.product="OpenShift Container Platform" \
