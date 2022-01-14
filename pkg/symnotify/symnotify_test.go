@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/log-file-metric-exporter/pkg/symnotify"
 	"github.com/stretchr/testify/assert"
@@ -58,11 +57,10 @@ func (f *Fixture) Link(name string) (string, *os.File) {
 
 func (f *Fixture) Event() symnotify.Event {
 	f.T.Helper()
-	e, err := f.Watcher.EventTimeout(time.Second)
+	e, err := f.Watcher.Event()
 	require.NoError(f.T, err)
 	return e
 }
-
 func TestWatchesRealFiles(t *testing.T) {
 	f := NewFixture(t)
 	assert, require := assert.New(t), require.New(t)

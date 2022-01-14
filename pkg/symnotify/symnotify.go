@@ -3,14 +3,13 @@
 package symnotify
 
 import (
-	"github.com/ViaQ/logerr/log"
-	"github.com/fsnotify/fsnotify"
 	"io"
 	"io/ioutil"
-	"math"
 	"os"
 	"path/filepath"
-	"time"
+
+	"github.com/ViaQ/logerr/log"
+	"github.com/fsnotify/fsnotify"
 )
 
 type Event = fsnotify.Event
@@ -34,34 +33,25 @@ func NewWatcher() (*Watcher, error) {
 	return &Watcher{watcher: w}, err
 }
 
-// Event returns the next event.
+// Event returns the next event or an error.
 func (w *Watcher) Event() (e Event, err error) {
-	return w.EventTimeout(time.Duration(math.MaxInt64))
-}
-
-// EventTimeout returns the next event or os.ErrDeadlineExceeded if timeout is exceeded.
-func (w *Watcher) EventTimeout(timeout time.Duration) (e Event, err error) {
 	var ok bool
 	select {
 	case e, ok = <-w.watcher.Events:
 	case err, ok = <-w.watcher.Errors:
-	case <-time.After(timeout):
-		return Event{}, os.ErrDeadlineExceeded
 	}
 	switch {
 	case !ok:
-		return Event{}, io.EOF
+		return Event{}, io.EOF // Watcher has been closed.
 	case e.Op == Create:
-		log.V(2).Info("Create Event Detected for file..", "e.Name", e.Name)
 		if info, err := os.Lstat(e.Name); err == nil {
 			if isSymlink(info) {
 				_ = w.watcher.Add(e.Name)
 			}
 		}
 	case e.Op == Remove:
-		log.V(2).Info("Remove Event Detected for file..", "e.Name", e.Name)
+		_ = w.watcher.Remove(e.Name)
 	case e.Op == Chmod || e.Op == Rename:
-		log.V(2).Info("Chmod or Rename Event Detected for file..", "e.Name", e.Name)
 		if info, err := os.Lstat(e.Name); err == nil {
 			if isSymlink(info) {
 				// Symlink target may have changed.
