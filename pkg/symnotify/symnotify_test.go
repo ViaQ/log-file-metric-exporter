@@ -24,7 +24,7 @@ func NewFixture(t *testing.T) *Fixture {
 	f := &Fixture{T: t}
 
 	var err error
-	f.Root, err = ioutil.TempDir("", t.Name())
+	f.Root = t.TempDir()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(f.Root) })
 
@@ -61,6 +61,27 @@ func (f *Fixture) Event() symnotify.Event {
 	require.NoError(f.T, err)
 	return e
 }
+
+func TestCreateWriteRemove(t *testing.T) {
+	f := NewFixture(t)
+	assert, require := assert.New(t), require.New(t)
+	// Create file before starting watcher
+	log1, f1 := f.Create(Join(f.Logs, "log1"))
+	require.NoError(f.Watcher.Add(f.Logs))
+	// Create log after starting watcher
+	log2, _ := f.Create(Join(f.Logs, "log2"))
+	assert.Equal(f.Event(), symnotify.Event{Name: log2, Op: symnotify.Create})
+
+	_, err := f1.Write([]byte("hello\n"))
+	assert.NoError(err)
+	assert.Equal(f.Event(), symnotify.Event{Name: log1, Op: symnotify.Write})
+
+	assert.NoError(os.Remove(log1))
+	assert.Equal(f.Event(), symnotify.Event{Name: log1, Op: symnotify.Remove})
+	assert.NoError(os.Remove(log2))
+	assert.Equal(f.Event(), symnotify.Event{Name: log2, Op: symnotify.Remove})
+}
+
 func TestWatchesRealFiles(t *testing.T) {
 	f := NewFixture(t)
 	assert, require := assert.New(t), require.New(t)
@@ -91,6 +112,10 @@ func TestWatchesRealFiles(t *testing.T) {
 	assert.NoError(os.Rename(log1, newlog1))
 	assert.Equal(f.Event(), symnotify.Event{Name: log1, Op: symnotify.Rename})
 	assert.Equal(f.Event(), symnotify.Event{Name: newlog1, Op: symnotify.Create})
+
+	assert.NoError(os.Remove(log2))
+	assert.Equal(f.Event(), symnotify.Event{Name: log2, Op: symnotify.Remove})
+
 	nw, errw = file1.Write([]byte("x"))
 	if errw == nil && nw > 0 {
 		assert.Equal(f.Event(), symnotify.Event{Name: newlog1, Op: symnotify.Write})
@@ -129,6 +154,10 @@ func TestWatchesSymlinks(t *testing.T) {
 	assert.NoError(os.Rename(link1, newlink1))
 	assert.Equal(f.Event(), symnotify.Event{Name: link1, Op: symnotify.Rename})
 	assert.Equal(f.Event(), symnotify.Event{Name: newlink1, Op: symnotify.Create})
+
+	assert.NoError(os.Remove(link2))
+	assert.Equal(f.Event(), symnotify.Event{Name: link2, Op: symnotify.Remove})
+
 	nw3, errw3 := file1.Write([]byte("x"))
 	if errw3 == nil && nw3 > 0 {
 		assert.Equal(f.Event(), symnotify.Event{Name: newlink1, Op: symnotify.Write})
@@ -154,4 +183,22 @@ func TestWatchesSymlinkTargetsChanged(t *testing.T) {
 	got, err := ioutil.ReadFile((link))
 	assert.NoError(err)
 	assert.Equal(string(got), "temp")
+}
+
+func TestCreateRemoveEmpty(t *testing.T) {
+	f := NewFixture(t)
+	assert, require := assert.New(t), require.New(t)
+	require.NoError(f.Watcher.Add(f.Logs))
+	name, file := f.Create(Join(f.Logs, "foo"))
+	_, err := file.Write([]byte("x"))
+	assert.Equal(f.Event(), symnotify.Event{Name: name, Op: symnotify.Create})
+	assert.Equal(f.Event(), symnotify.Event{Name: name, Op: symnotify.Write})
+	file.Close()
+	file, err = os.Open(name)
+	assert.NoError(err)
+	file.Close()
+	require.NoError(os.Remove(name))
+	file, err = os.Open(name)
+	require.Error(err)
+	assert.Equal(f.Event(), symnotify.Event{Name: name, Op: symnotify.Remove})
 }
