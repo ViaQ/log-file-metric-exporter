@@ -1,6 +1,6 @@
 ### This is a generated file from Dockerfile.in ###
 #@follow_tag(registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:rhel_8_golang_1.15)
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.7 AS builder
+FROM registry.access.redhat.com/ubi8/go-toolset AS builder
 
 ENV BUILD_VERSION=1.0.0
 ENV OS_GIT_MAJOR=1
@@ -11,13 +11,14 @@ ENV SOURCE_GIT_URL=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_URL}
 ENV REMOTE_SOURCE=${REMOTE_SOURCE:-.}
 
 
+USER 0
 WORKDIR  /go/src/github.com/log-file-metric-exporter
 COPY ${REMOTE_SOURCE} .
 
 RUN make build
 
 #@follow_tag(registry.redhat.io/ubi8:latest)
-FROM registry.ci.openshift.org/ocp/4.7:base
+FROM registry.access.redhat.com/ubi8
 COPY --from=builder /go/src/github.com/log-file-metric-exporter/bin/log-file-metric-exporter  /usr/local/bin/.
 COPY --from=builder /go/src/github.com/log-file-metric-exporter/hack/log-file-metric-exporter.sh  /usr/local/bin/.
 
