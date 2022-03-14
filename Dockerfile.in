@@ -13,6 +13,7 @@ ENV REMOTE_SOURCE=${REMOTE_SOURCE:-.}
 ENV REMOTE_SOURCE=${REMOTE_SOURCE}/app
 ## EXCLUDE END ##
 
+USER 0
 WORKDIR  /go/src/github.com/log-file-metric-exporter
 COPY ${REMOTE_SOURCE} .
 
