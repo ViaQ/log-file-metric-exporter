@@ -40,13 +40,18 @@ func (w *Watcher) Event() (e Event, err error) {
 	case e, ok = <-w.watcher.Events:
 	case err, ok = <-w.watcher.Errors:
 	}
+	if !ok {
+		err = io.EOF
+	}
+	if err != nil {
+		return Event{}, err
+	}
+	log.V(3).Info("event", "path", e.Name, "operation", e.Op.String())
 	switch {
-	case !ok:
-		return Event{}, io.EOF // Watcher has been closed.
 	case e.Op == Create:
 		if info, err := os.Lstat(e.Name); err == nil {
-			if isSymlink(info) {
-				_ = w.watcher.Add(e.Name)
+			if isSymlink(info) || info.IsDir() {
+				_ = w.Add(e.Name)
 			}
 		}
 	case e.Op == Remove:
@@ -60,22 +65,25 @@ func (w *Watcher) Event() (e Event, err error) {
 			}
 		}
 	}
-	return e, err
+	return e, nil
 }
 
-// Add dir,dir/files* to the watcher
-func (w *Watcher) Add(name string) error {
+// Add a new directory, file or symlink to be watched.
+func (w *Watcher) Add(name string) (err error) {
+	log.V(3).Info("start watching", "path", name)
 	if err := w.watcher.Add(name); err != nil {
+		log.Error(err, "error watching", "path", name)
 		return err
 	}
-
-	// Scan directories for existing symlinks, we wont' get a Create for those.
+	// If name is a directory, scan for existing symlinks and sub-directories to watch.
 	if infos, err := ioutil.ReadDir(name); err == nil {
 		for _, info := range infos {
-			if isSymlink(info) {
-				log.V(3).Info("Adding file to watcher ...", "filename", filepath.Join(name, info.Name()))
-				err := w.watcher.Add(filepath.Join(name, info.Name()))
-				log.V(3).Info("err return by watcher.Add call ...", "err", err)
+			newName := filepath.Join(name, info.Name())
+			switch {
+			case info.IsDir():
+				return w.Add(newName)
+			case isSymlink(info):
+				return w.watcher.Add(newName)
 			}
 		}
 	}
@@ -84,7 +92,7 @@ func (w *Watcher) Add(name string) error {
 
 // Remove name from watcher
 func (w *Watcher) Remove(name string) error {
-	//delete(w.added, name)
+	log.V(3).Info("stop watching", "path", name)
 	return w.watcher.Remove(name)
 }
 
