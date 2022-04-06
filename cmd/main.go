@@ -23,7 +23,7 @@ func main() {
 		verbosity int
 	)
 	flag.StringVar(&dir, "dir", logDir, "Directory containing log files")
-	flag.IntVar(&verbosity, "verbose", 0, "set verbosity level")
+	flag.IntVar(&verbosity, "verbosity", 0, "set verbosity level")
 	flag.StringVar(&addr, "http", ":2112", "HTTP service address where metrics are exposed")
 	flag.StringVar(&crtFile, "crtFile", "/etc/fluent/metrics/tls.crt", "cert file for log-file-metric-exporter service")
 	flag.StringVar(&keyFile, "keyFile", "/etc/fluent/metrics/tls.key", "key file for log-file-metric-exporter service")
