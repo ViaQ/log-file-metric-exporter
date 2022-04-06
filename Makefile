@@ -5,7 +5,7 @@ export GO111MODULE=on
 ARTIFACT_DIR?=./tmp
 CURPATH=$(PWD)
 GOFLAGS?=
-CLO_RELEASE_VERSION?=5.2
+CLO_RELEASE_VERSION?=5.4
 BIN_NAME=log-file-metric-exporter
 IMAGE_REPOSITORY_NAME=quay.io/openshift-logging/origin-${BIN_NAME}:${CLO_RELEASE_VERSION}
 LOCAL_IMAGE_TAG=127.0.0.1:5000/openshift/origin-${BIN_NAME}:${CLO_RELEASE_VERSION}
@@ -60,6 +60,7 @@ COVERAGE_DIR=$(ARTIFACT_DIR)/coverage
 test: artifactdir
 	@mkdir -p $(COVERAGE_DIR)
 	@go test -race -coverprofile=$(COVERAGE_DIR)/test-unit.cov ./pkg/...
+	@go test -v ./cmd
 	@go tool cover -html=$(COVERAGE_DIR)/test-unit.cov -o $(COVERAGE_DIR)/test-unit-coverage.html
 	@go tool cover -func=$(COVERAGE_DIR)/test-unit.cov | tail -n 1
 .PHONY: test

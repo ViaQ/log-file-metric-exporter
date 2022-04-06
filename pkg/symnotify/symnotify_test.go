@@ -47,6 +47,12 @@ func (f *Fixture) Create(name string) (string, *os.File) {
 	return name, file
 }
 
+func (f *Fixture) Mkdir(name string) {
+	f.T.Helper()
+	err := os.Mkdir(name, 0777)
+	require.NoError(f.T, err)
+}
+
 func (f *Fixture) Link(name string) (string, *os.File) {
 	f.T.Helper()
 	target, file := f.Create(Join(f.Targets, name))
@@ -201,4 +207,44 @@ func TestCreateRemoveEmpty(t *testing.T) {
 	file, err = os.Open(name)
 	require.Error(err)
 	assert.Equal(f.Event(), symnotify.Event{Name: name, Op: symnotify.Remove})
+}
+
+func TestWatchesSubdirectories(t *testing.T) {
+	f := NewFixture(t)
+	assert, require := assert.New(t), require.New(t)
+
+	// Create file in subdir before starting watcher
+	f.Mkdir(Join(f.Logs, "dir1"))
+	log1, file1 := f.Create(Join(f.Logs, "dir1", "log1"))
+	log2, file2 := f.Create(Join(f.Logs, "dir1", "log2"))
+	f.Mkdir(Join(f.Logs, "dir1", "dir2"))
+	log3, file3 := f.Create(Join(f.Logs, "dir1", "dir2", "log3"))
+	require.NoError(f.Watcher.Add(f.Logs))
+
+	// Create log after starting watcher
+	log4, file4 := f.Create(Join(f.Logs, "dir1", "dir2", "log4"))
+	assert.Equal(f.Event(), symnotify.Event{Name: log4, Op: symnotify.Create})
+
+	// Write to logs, check Events.
+	nw, errw := file1.Write([]byte("hello1"))
+	if errw == nil && nw > 0 {
+		assert.Equal(f.Event(), symnotify.Event{Name: log1, Op: symnotify.Write})
+	}
+	errt := file1.Truncate(0)
+	if errt == nil {
+		assert.Equal(f.Event(), symnotify.Event{Name: log1, Op: symnotify.Write})
+	}
+	nw, errw = file2.Write([]byte("hello2"))
+	if errw == nil && nw > 0 {
+		assert.Equal(f.Event(), symnotify.Event{Name: log2, Op: symnotify.Write})
+	}
+	nw, errw = file3.Write([]byte("hello3"))
+	if errw == nil && nw > 0 {
+		assert.Equal(f.Event(), symnotify.Event{Name: log3, Op: symnotify.Write})
+	}
+
+	nw, errw = file4.Write([]byte("hello4"))
+	if errw == nil && nw > 0 {
+		assert.Equal(f.Event(), symnotify.Event{Name: log4, Op: symnotify.Write})
+	}
 }
