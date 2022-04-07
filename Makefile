@@ -1,5 +1,5 @@
 export GOROOT=$(shell go env GOROOT)
-export GOFLAGS=-mod=vendor
+export GOFLAGS=
 export GO111MODULE=on
 
 ARTIFACT_DIR?=./tmp
@@ -41,10 +41,6 @@ fmt:
 build: fmt
 	go build $(LDFLAGS) -o $(TARGET) $(MAIN_PKG)
 .PHONY: build
-
-vendor:
-	go mod vendor
-.PHONY: vendor
 
 image:
 	podman build -f Dockerfile -t $(LOCAL_IMAGE_TAG) .
