@@ -4,6 +4,7 @@ package symnotify
 
 import (
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -49,51 +50,62 @@ func (w *Watcher) Event() (e Event, err error) {
 	log.V(3).Info("event", "path", e.Name, "operation", e.Op.String())
 	switch {
 	case e.Op == Create:
-		if info, err := os.Lstat(e.Name); err == nil {
+		var info os.FileInfo
+		if info, err = os.Lstat(e.Name); err == nil {
 			if isSymlink(info) || info.IsDir() {
-				_ = w.Add(e.Name)
+				err = w.Add(e.Name)
 			}
 		}
 	case e.Op == Remove:
-		_ = w.watcher.Remove(e.Name)
+		err = w.watcher.Remove(e.Name)
 	case e.Op == Chmod || e.Op == Rename:
-		if info, err := os.Lstat(e.Name); err == nil {
+		var info os.FileInfo
+		if info, err = os.Lstat(e.Name); err == nil {
 			if isSymlink(info) {
 				// Symlink target may have changed.
-				_ = w.watcher.Remove(e.Name)
-				_ = w.watcher.Add(e.Name)
+				err = w.watcher.Remove(e.Name)
+				err = w.watcher.Add(e.Name)
 			}
 		}
+	}
+	if err != nil {
+		log.Error(err, "Error retrieving event", "path", e.Name, "operation", e.Op.String())
 	}
 	return e, nil
-}
-
-// Add a new directory, file or symlink to be watched.
-func (w *Watcher) Add(name string) (err error) {
-	log.V(3).Info("start watching", "path", name)
-	if err := w.watcher.Add(name); err != nil {
-		log.Error(err, "error watching", "path", name)
-		return err
-	}
-	// If name is a directory, scan for existing symlinks and sub-directories to watch.
-	if infos, err := ioutil.ReadDir(name); err == nil {
-		for _, info := range infos {
-			newName := filepath.Join(name, info.Name())
-			switch {
-			case info.IsDir():
-				return w.Add(newName)
-			case isSymlink(info):
-				return w.watcher.Add(newName)
-			}
-		}
-	}
-	return nil
 }
 
 // Remove name from watcher
 func (w *Watcher) Remove(name string) error {
 	log.V(3).Info("stop watching", "path", name)
 	return w.watcher.Remove(name)
+}
+
+// Add a new directory, file or symlink to be watched.
+func (w *Watcher) Add(name string) (err error) {
+	log.V(3).Info("start watching", "path", name)
+	if err = w.watcher.Add(name); err != nil {
+		log.Error(err, "error watching", "path", name)
+		return err
+	}
+	// If name is a directory, scan for existing symlinks and sub-directories to watch.
+	var infos []fs.FileInfo
+	if infos, err = ioutil.ReadDir(name); err == nil {
+		for _, info := range infos {
+			log.V(3).Info("Checking path for more files to watch", "name", name, "subpath", info.Name())
+			newName := filepath.Join(name, info.Name())
+			switch {
+			case info.IsDir():
+				if e := w.Add(newName); e != nil {
+					log.Error(e, "Error path to watch", "path", newName)
+				}
+			case isSymlink(info):
+				if e := w.watcher.Add(newName); e != nil {
+					log.Error(e, "Error for symnotify#Add", "path", newName)
+				}
+			}
+		}
+	}
+	return err
 }
 
 // Close watcher
