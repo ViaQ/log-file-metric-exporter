@@ -1,10 +1,10 @@
 ### This is a generated file from Dockerfile.in ###
-#@follow_tag(registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:rhel_8_golang_1.15)
+#@follow_tag(registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:rhel_8_golang_1.17)
 FROM registry.access.redhat.com/ubi8/go-toolset AS builder
 
-ENV BUILD_VERSION=1.0.0
+ENV BUILD_VERSION=1.1.0
 ENV OS_GIT_MAJOR=1
-ENV OS_GIT_MINOR=0
+ENV OS_GIT_MINOR=1
 ENV OS_GIT_PATCH=0
 ENV SOURCE_GIT_COMMIT=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_COMMIT}
 ENV SOURCE_GIT_URL=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_URL}
@@ -36,7 +36,6 @@ LABEL \
         io.openshift.build.commit.id=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_COMMIT} \
         io.openshift.build.source-location=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_URL} \
         io.openshift.build.commit.url=${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_URL}/commit/${CI_LOG_FILE_METRIC_EXPORTER_UPSTREAM_COMMIT} \
-        version=v1.0.0
+        version=v1.1.0
 
 CMD ["sh", "-c", "/usr/local/bin/log-file-metric-exporter.sh"]
-
