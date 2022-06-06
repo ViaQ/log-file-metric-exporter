@@ -38,7 +38,7 @@ func (w *FileWatcher) Update(path string, namespace string, podname string, cont
 	var lastSize float64
 	var size float64
 
-	counter, err := w.metrics.GetMetricWithLabelValues(path, namespace, podname, containername)
+	counter, err := w.metrics.GetMetricWithLabelValues(namespace, podname, containername)
 	if err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ func (w *FileWatcher) Update(path string, namespace string, podname string, cont
 		// File truncated, starting over. Add the size.
 		add = size
 	}
-	log.V(3).Info("For logfile in...", "path", path, "lastsize", lastSize, "currentsize", size, "addedbytes", add)
+	log.V(3).Info("For logfile in...", "lastsize", lastSize, "currentsize", size, "addedbytes", add)
 	counter.Add(add)
 	return nil
 }
@@ -134,7 +134,7 @@ func main() {
 		metrics: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "log_logged_bytes_total",
 			Help: "Total number of bytes written to a single log file path, accounting for rotations",
-		}, []string{"path", "namespace", "podname", "containername"}),
+		}, []string{"namespace", "podname", "containername"}),
 		sizes: make(map[string]float64),
 		added: make(map[string]bool),
 	}
