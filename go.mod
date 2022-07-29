@@ -1,6 +1,6 @@
 module github.com/log-file-metric-exporter
 
-go 1.17
+go 1.18
 
 require (
 	github.com/ViaQ/logerr v1.0.9
