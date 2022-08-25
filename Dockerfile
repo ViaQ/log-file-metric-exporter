@@ -1,5 +1,5 @@
 ### This is a generated file from Dockerfile.in ###
-#@follow_tag(registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:rhel_8_golang_1.17)
+#@follow_tag(registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:rhel_8_golang_1.18)
 FROM registry.access.redhat.com/ubi8/go-toolset AS builder
 
 ENV BUILD_VERSION=1.1.0
@@ -39,3 +39,4 @@ LABEL \
         version=v1.1.0
 
 CMD ["sh", "-c", "/usr/local/bin/log-file-metric-exporter.sh"]
+
