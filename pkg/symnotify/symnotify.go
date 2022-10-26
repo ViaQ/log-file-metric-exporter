@@ -1,8 +1,8 @@
 // package symnotify provides a file system watcher that notifies events for symlink targets.
-//
 package symnotify
 
 import (
+	"errors"
 	"io"
 	"io/fs"
 	"io/ioutil"
@@ -69,7 +69,9 @@ func (w *Watcher) Event() (e Event, err error) {
 		}
 	}
 	if err != nil {
-		log.Error(err, "Error retrieving event", "path", e.Name, "operation", e.Op.String())
+		if !errors.Is(err, fsnotify.ErrNonExistentWatch) {
+			log.Error(err, "Error retrieving event", "path", e.Name, "operation", e.Op.String())
+		}
 	}
 	return e, nil
 }
