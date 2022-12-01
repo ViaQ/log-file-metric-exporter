@@ -2,20 +2,22 @@ package main
 
 import (
 	"flag"
-	"github.com/ViaQ/logerr/log"
-	"github.com/log-file-metric-exporter/pkg/symnotify"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
 	"os"
 	"regexp"
+
+	"github.com/ViaQ/logerr/log"
+	"github.com/fsnotify/fsnotify"
+	"github.com/log-file-metric-exporter/pkg/symnotify"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
 	verbosity int = 0
 	//Reference regexp https://github.com/fabric8io/fluent-plugin-kubernetes_metadata_filter/blob/master/lib/fluent/plugin/filter_kubernetes_metadata.rb#L56, https://github.com/kubernetes/kubernetes/blob/release-1.6/pkg/kubelet/dockertools/docker.go
 	//compile k8 logfilepathname pattern
-	kubernetesregexpCompiled = regexp.MustCompile(`.var.log.containers.([a-z0-9][-a-z0-9]*[a-z0-9])_([^_]+)_(.+)-([a-z0-9]{64})\.log$`)
+	kubernetesregexpCompiled = regexp.MustCompile(`.var.log.containers.(?P<pod>[^_]+)_(?P<ns>[a-z0-9][-a-z0-9]*[a-z0-9])_(?P<container>.+)-(?P<dockerid>[a-z0-9]{64})\.log`)
 )
 
 const (
@@ -79,27 +81,28 @@ func (w *FileWatcher) Watch() {
 		}
 
 		log.V(3).Info("Events notified for...", "e.Name", e.Name, "Event", e.Op)
-
-		//Get namespace, podname, containername from e.Name - log file path
-
-		r2 := kubernetesregexpCompiled.FindStringSubmatch(e.Name)
-
-		//if submatches == nil {
-		if r2 == nil {
-			log.V(2).Info("filename doesn't conform with k8 logfile path name ...", "filename", e.Name)
+		if e.Op == fsnotify.Remove {
+			delete(w.sizes, e.Name)
 		} else {
-			podname := r2[PodNameIndex]
-			namespace := r2[NamespaceIndex]
-			containername := r2[ContainerNameIndex]
-			dockerid := r2[DockerIndex]
-			log.V(3).Info("Namespace podname containername...", "namespace", namespace, "podname", podname, "containername", containername, "dockerid", dockerid)
 
-			err := w.Update(e.Name, namespace, podname, containername)
-			if err != nil {
-				log.V(2).Info("file e.Name Stat can't be checked", "filename", e.Name)
+			//Get namespace, podname, containername from e.Name - log file path
+			matches := kubernetesregexpCompiled.FindStringSubmatch(e.Name)
+
+			if matches == nil {
+				log.V(2).Info("filename doesn't conform with k8 logfile path name ...", "filename", e.Name)
+			} else {
+				podname := matches[PodNameIndex]
+				namespace := matches[NamespaceIndex]
+				containername := matches[ContainerNameIndex]
+				dockerid := matches[DockerIndex]
+				log.V(3).Info("Namespace podname containername...", "namespace", namespace, "podname", podname, "containername", containername, "dockerid", dockerid)
+
+				err := w.Update(e.Name, namespace, podname, containername)
+				if err != nil {
+					log.V(2).Info("file e.Name Stat can't be checked", "filename", e.Name, "error", err)
+				}
 			}
 		}
-
 	}
 }
 
