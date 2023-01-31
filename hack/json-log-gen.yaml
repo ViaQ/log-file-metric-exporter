@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-project2
+spec:
+  finalizers:
+  - kubernetes
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    component: test
+  name: json-log-generator
+  namespace: my-project2
+code: &code-str |
+  import time,json,sys,datetime
+  def set_vals():
+    data["msgcontent"]="My life is my message"
+    data["facility_key"]="local0"
+    data["severity_key"]="Informational"
+    data["mykey0"]="myvalue"
+    data["mykey1"]="myvalue"
+    data["mykey2"]="myvalue"
+    data["mykey3"]="myvalue"
+    data["mykey4"]="myvalue"
+    data["mykey5"]="myvalue"
+    data["mykey6"]="myvalue"
+    data["mykey7"]="myvalue"
+    data["mykey8"]="myvalue"
+    data["mykey9"]="myvalue"
+  i=0
+  while True:
+    i=i+1
+    ts=time.time()
+    data={
+      "timestamp"   :datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S'),
+      "index"       :i,
+    }
+    set_vals()
+    print json.dumps(data)
+    sys.stdout.flush()
+    // uncomment below two lines for testing a container restart.
+    // once container exits, it will be restarted, and log file will rotate as 0.log, 1.log, 2.log ....
+    // if i == 1000:
+    //   sys.exit(-1)
+    time.sleep(0.1) # sleep for 100 msec
+
+spec:
+  containers:
+    - args:
+        - python2
+        - -c
+        - *code-str
+      image: centos:centos7
+      imagePullPolicy: IfNotPresent
+      name: log-generator
+      resources: {}

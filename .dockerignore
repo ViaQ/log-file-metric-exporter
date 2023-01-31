@@ -1,0 +1,7 @@
+*
+!Makefile
+!go.mod
+!go.sum
+!main.go
+!internal
+!hack

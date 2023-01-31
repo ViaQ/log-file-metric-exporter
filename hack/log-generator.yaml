@@ -1,0 +1,23 @@
+namespace: &ns my-project2
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: *ns
+  labels:
+    key1: "value1"
+    key2: "value2"
+spec:
+  finalizers:
+  - kubernetes
+---
+namespace: &ns my-project2
+apiVersion: v1
+kind: Pod
+metadata:
+  name: log-generator
+  namespace: *ns
+spec:
+  containers:
+    - name: log-generator
+      image: docker.io/library/busybox:1.31.1
+      args: ["sh", "-c", "i=0; while true; do echo $i: Test message; echo $i: Info Test message info; echo $i: Error Test message error; echo $i: Notice Test message notice; i=$((i+1)) ; sleep 2; done"]
