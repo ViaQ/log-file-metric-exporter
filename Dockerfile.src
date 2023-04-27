@@ -1,0 +1,8 @@
+FROM registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.19-openshift-4.13
+
+COPY . /tmp/src
+
+WORKDIR /tmp/src
+# RUN go mod download
+
+CMD ["make","test"]

@@ -25,7 +25,7 @@ func runMain(t *testing.T, dir string) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // create session so we can kill go run and sub-processes
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
-		require.NoError(t, syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL))
+		require.NoError(t, syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM))
 		_ = cmd.Wait()
 	})
 }

@@ -1,5 +1,0 @@
-from:
-- source: registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder\:v(?:[\.0-9\-]*).*
-  target: registry.access.redhat.com/ubi8/go-toolset AS builder
-- source: registry.redhat.io/ubi8:8.(\d)-([\.0-9])*
-  target: registry.access.redhat.com/ubi8

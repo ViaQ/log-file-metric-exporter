@@ -5,7 +5,7 @@ export GO111MODULE=on
 ARTIFACT_DIR?=./tmp
 CURPATH=$(PWD)
 GOFLAGS?=
-CLO_RELEASE_VERSION?=5.4
+CLO_RELEASE_VERSION?=5.8
 BIN_NAME=log-file-metric-exporter
 IMAGE_REPOSITORY_NAME=quay.io/openshift-logging/origin-${BIN_NAME}:${CLO_RELEASE_VERSION}
 LOCAL_IMAGE_TAG=127.0.0.1:5000/openshift/origin-${BIN_NAME}:${CLO_RELEASE_VERSION}
@@ -68,6 +68,3 @@ test: artifactdir
 lint:
 	@hack/run-linter
 .PHONY: lint
-gen-dockerfiles:
-	./hack/generate-dockerfile-from-midstream > Dockerfile
-.PHONY: gen-dockerfiles
