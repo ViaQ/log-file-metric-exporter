@@ -3,6 +3,6 @@ FROM registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.19-open
 COPY . /tmp/src
 
 WORKDIR /tmp/src
-# RUN go mod download
+RUN go mod download
 
 CMD ["make","test"]
