@@ -116,7 +116,7 @@ func main() {
 		log.Error(err, "watch error", "path", dir)
 		os.Exit(1)
 	}
-
+	defer w.Close()
 	go func() {
 		if err := w.Watch(); err != nil {
 			log.Error(err, "error in watch", "path", dir)
