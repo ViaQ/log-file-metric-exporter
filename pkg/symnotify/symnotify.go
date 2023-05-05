@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ViaQ/logerr/log"
+	log "github.com/ViaQ/logerr/v2/log/static"
 	"github.com/fsnotify/fsnotify"
 )
 

@@ -47,6 +47,11 @@ image:
 	podman tag ${LOCAL_IMAGE_TAG} ${IMAGE_REPOSITORY_NAME}
 .PHONY: image
 
+image-src:
+	podman build -f Dockerfile.src -t $(LOCAL_IMAGE_TAG)-src .
+	podman tag ${LOCAL_IMAGE_TAG}-src ${IMAGE_REPOSITORY_NAME}-src
+.PHONY: image-src
+
 deploy-image: image
 	IMAGE_TAG=$(LOCAL_IMAGE_TAG) hack/deploy-image.sh
 	IMAGE_TAG=$(IMAGE_REPOSITORY_NAME) hack/deploy-image.sh
@@ -64,6 +69,19 @@ test: artifactdir
 	@go tool cover -html=$(COVERAGE_DIR)/test-unit.cov -o $(COVERAGE_DIR)/test-unit-coverage.html
 	@go tool cover -func=$(COVERAGE_DIR)/test-unit.cov | tail -n 1
 .PHONY: test
+
+test-container-local: image-src
+	podman run -it $(LOCAL_IMAGE_TAG)-src make test
+.PHONY: test-container-local
+
+test-container-on-cluster: push-image-src
+	oc create ns test-deleteme
+	oc -n test-deleteme run test-unit --image-pull-policy='Always' --image=${IMAGE_REPOSITORY_NAME}-src --restart='Never' --command -- make test
+.PHONY: test-container-on-cluster
+
+push-image-src: image-src
+	podman push $(IMAGE_REPOSITORY_NAME)-src
+.PHONY: push-image-src
 
 lint:
 	@hack/run-linter
