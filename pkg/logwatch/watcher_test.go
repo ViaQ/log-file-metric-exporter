@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ViaQ/logerr/log"
+	log "github.com/ViaQ/logerr/v2/log/static"
 )
 
 const (

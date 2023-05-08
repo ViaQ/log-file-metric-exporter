@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/ViaQ/logerr/log"
+	log "github.com/ViaQ/logerr/v2/log/static"
 	"github.com/fsnotify/fsnotify"
 	"github.com/log-file-metric-exporter/pkg/symnotify"
 	"github.com/prometheus/client_golang/prometheus"

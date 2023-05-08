@@ -9,7 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ViaQ/logerr/log"
+	logv2 "github.com/ViaQ/logerr/v2/log"
+	log "github.com/ViaQ/logerr/v2/log/static"
 	"github.com/log-file-metric-exporter/pkg/logwatch"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -89,6 +90,11 @@ func openSSLToIANACipherSuites(ciphers []string) []string {
 	return ianaCiphers
 }
 
+func InitLogger(verbosity int) {
+	logger := logv2.NewLogger("log-file-metric-exporter", logv2.WithVerbosity(verbosity))
+	log.SetLogger(logger)
+}
+
 func main() {
 	var (
 		dir           string
@@ -108,7 +114,7 @@ func main() {
 	flag.StringVar(&cipherSuites, "cipherSuites", "", "cipher suites to accept")
 	flag.Parse()
 
-	log.SetLogLevel(verbosity)
+	InitLogger(verbosity)
 	log.Info("start log metric exporter", "path", dir)
 
 	w, err := logwatch.New(dir)
