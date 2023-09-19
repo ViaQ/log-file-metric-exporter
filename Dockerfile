@@ -13,7 +13,7 @@ COPY ${REMOTE_SOURCE} .
 
 RUN make build
 
-FROM registry.access.redhat.com/ubi9/ubi:9.1
+FROM registry.access.redhat.com/ubi9/ubi-minimal
 COPY --from=builder /go/src/github.com/log-file-metric-exporter/bin/log-file-metric-exporter  /usr/local/bin/.
 COPY --from=builder /go/src/github.com/log-file-metric-exporter/hack/log-file-metric-exporter.sh  /usr/local/bin/.
 
