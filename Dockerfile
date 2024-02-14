@@ -28,7 +28,7 @@ LABEL \
         com.redhat.component="log-file-metric-exporter-container" \
         io.openshift.maintainer.product="OpenShift Container Platform" \
         io.openshift.maintainer.component="Logging" \
-        version=v1.1.0
+        version=release-5.8
 
 CMD ["sh", "-c", "/usr/local/bin/log-file-metric-exporter.sh"]
 
