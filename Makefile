@@ -5,10 +5,11 @@ export GO111MODULE=on
 ARTIFACT_DIR?=./tmp
 CURPATH=$(PWD)
 GOFLAGS?=
-CLO_RELEASE_VERSION?=5.8
+BUILD_VERSION?=1.2.0
 BIN_NAME=log-file-metric-exporter
-IMAGE_REPOSITORY_NAME=quay.io/openshift-logging/origin-${BIN_NAME}:${CLO_RELEASE_VERSION}
-LOCAL_IMAGE_TAG=127.0.0.1:5000/openshift/origin-${BIN_NAME}:${CLO_RELEASE_VERSION}
+CONTAINER_BUILD_ARGS ?=
+IMAGE_REPOSITORY_NAME=quay.io/openshift-logging/origin-${BIN_NAME}:v${BUILD_VERSION}
+LOCAL_IMAGE_TAG=127.0.0.1:5000/openshift/origin-${BIN_NAME}:v${BUILD_VERSION}
 #just for testing purpose pushing it to docker.io
 MAIN_PKG=cmd/main.go
 TARGET_DIR=$(CURPATH)/_output
@@ -43,7 +44,7 @@ build: fmt
 .PHONY: build
 
 image:
-	podman build -f Dockerfile -t $(LOCAL_IMAGE_TAG) .
+	podman build -f Dockerfile -t $(LOCAL_IMAGE_TAG) $(CONTAINER_BUILD_ARGS) --build-arg BUILD_VERSION=$(BUILD_VERSION) .
 	podman tag ${LOCAL_IMAGE_TAG} ${IMAGE_REPOSITORY_NAME}
 .PHONY: image
 
