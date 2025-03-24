@@ -4,14 +4,13 @@ filters:
     approvers:
       - jcantrill
       - alanconway
-      - vimalk78
+      - xperimental
     reviewers:
       - jcantrill
       - alanconway
-      - vimalk78
-      - syedriko
       - vparfonov
       - cahartma
+      - Clee2691
   "Dockerfile(?:\\.in)?$":   # matches Dockerfile, Dockerfile.in
     labels:
       - midstream/Dockerfile
