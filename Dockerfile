@@ -1,24 +1,22 @@
-FROM registry.access.redhat.com/ubi9/go-toolset AS builder
-
-ENV BUILD_VERSION=1.1.0
-ENV OS_GIT_MAJOR=1
-ENV OS_GIT_MINOR=1
-ENV OS_GIT_PATCH=0
-ENV REMOTE_SOURCE=${REMOTE_SOURCE:-.}
-
+FROM golang:1.23 AS builder
 
 USER 0
 WORKDIR  /go/src/github.com/log-file-metric-exporter
-COPY ${REMOTE_SOURCE} .
+
+COPY ./go.mod ./go.sum ./
+RUN go mod download
+COPY Makefile ./
+COPY ./cmd ./cmd
+COPY ./pkg ./pkg
 
 RUN make build
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal
-COPY --from=builder /go/src/github.com/log-file-metric-exporter/bin/log-file-metric-exporter  /usr/local/bin/.
-COPY --from=builder /go/src/github.com/log-file-metric-exporter/hack/log-file-metric-exporter.sh  /usr/local/bin/.
 
+ARG BUILD_VERSION=1.2.0
+
+COPY --from=builder /go/src/github.com/log-file-metric-exporter/bin/log-file-metric-exporter  /usr/local/bin/.
 RUN chmod +x /usr/local/bin/log-file-metric-exporter
-RUN chmod +x /usr/local/bin/log-file-metric-exporter.sh
 
 LABEL \
         io.k8s.display-name="OpenShift LogFileMetric Exporter" \
@@ -28,7 +26,7 @@ LABEL \
         com.redhat.component="log-file-metric-exporter-container" \
         io.openshift.maintainer.product="OpenShift Container Platform" \
         io.openshift.maintainer.component="Logging" \
-        version=v1.1.0
+        version="v${BUILD_VERSION}"
 
-CMD ["sh", "-c", "/usr/local/bin/log-file-metric-exporter.sh"]
+CMD ["/usr/local/bin/log-file-metric-exporter", "-verbosity=2", "-dir=/var/log/containers", "-http=:2112"]
 
