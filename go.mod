@@ -2,6 +2,8 @@ module github.com/log-file-metric-exporter
 
 go 1.23
 
+toolchain go1.23.6
+
 require (
 	github.com/ViaQ/logerr/v2 v2.1.0
 	github.com/fsnotify/fsnotify v1.6.0
