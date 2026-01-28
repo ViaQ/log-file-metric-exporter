@@ -24,8 +24,12 @@ LABEL \
         License="Apache-2.0" \
         name="openshift-logging/log-file-metric-exporter" \
         com.redhat.component="log-file-metric-exporter-container" \
+        description="OpenShift LogFileMetric Exporter component of OpenShift Cluster Logging" \
         io.openshift.maintainer.product="OpenShift Container Platform" \
         io.openshift.maintainer.component="Logging" \
+        io.openshift.tags="logging,LogFileMetric Exporter,observability" \
+        maintainer="AOS Logging <team-logging@redhat.com>" \
+        summary="A component in OpenShift that turns log lines into Prometheus metrics." \
         version="v${BUILD_VERSION}"
 
 CMD ["/usr/local/bin/log-file-metric-exporter", "-verbosity=2", "-dir=/var/log/containers", "-http=:2112"]
