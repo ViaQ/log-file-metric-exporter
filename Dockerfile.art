@@ -1,0 +1,35 @@
+FROM registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:v1.24.6-202510150934.g4284440.el9 AS builder
+
+ENV GOEXPERIMENT=strictfipsruntime
+ENV CGO_ENABLED=1
+
+COPY . /opt/app-root/src
+WORKDIR /opt/app-root/src
+
+RUN make build LDFLAGS="-tags strictfipsruntime"
+
+FROM registry.redhat.io/ubi9/ubi-minimal:9.7
+
+COPY --from=builder /opt/app-root/src/bin/log-file-metric-exporter  /usr/local/bin/.
+
+RUN chmod +x /usr/local/bin/log-file-metric-exporter
+
+CMD ["/usr/local/bin/log-file-metric-exporter", "-verbosity=2", "-dir=/var/log/containers", "-http=:2112"]
+
+LABEL \
+        com.redhat.component="log-file-metric-exporter-container" \
+        description="OpenShift LogFileMetric Exporter component of OpenShift Cluster Logging" \
+        distribution-scope="subscription" \
+        io.k8s.description="OpenShift LogFileMetric Exporter component of OpenShift Cluster Logging" \
+        io.k8s.display-name="OpenShift LogFileMetric Exporter" \
+        io.openshift.maintainer.component="Logging" \
+        io.openshift.maintainer.product="OpenShift Container Platform" \
+        io.openshift.tags="logging,eventrouter,observability" \
+        license="Apache-2.0" \
+        maintainer="AOS Logging <team-logging@redhat.com>" \
+        name="openshift-logging/log-file-metric-exporter-rhel9" \
+        summary="Container log file metrics agent for Red Hat Openshift Logging" \
+        url="https://catalog.redhat.com/en/software/containers/openshift-logging/log-file-metric-exporter-rhel9/6447991f3270b32a256c4e2a" \
+        vendor="Red Hat, Inc." \
+        version_minor="v1.1" \
+        version="v1.1.0"
