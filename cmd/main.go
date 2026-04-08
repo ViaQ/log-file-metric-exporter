@@ -11,6 +11,7 @@ import (
 
 	logv2 "github.com/ViaQ/logerr/v2/log"
 	log "github.com/ViaQ/logerr/v2/log/static"
+	"github.com/log-file-metric-exporter/pkg/auth"
 	"github.com/log-file-metric-exporter/pkg/logwatch"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -104,6 +105,7 @@ func main() {
 		verbosity     int
 		tlsMinVersion string
 		cipherSuites  string
+		secureMetrics bool
 	)
 	flag.StringVar(&dir, "dir", logDir, "Directory containing log files")
 	flag.IntVar(&verbosity, "verbosity", 0, "set verbosity level")
@@ -112,6 +114,7 @@ func main() {
 	flag.StringVar(&keyFile, "keyFile", "/etc/fluent/metrics/tls.key", "key file for log-file-metric-exporter service")
 	flag.StringVar(&tlsMinVersion, "tlsMinVersion", "", "minimal TLS version to accept")
 	flag.StringVar(&cipherSuites, "cipherSuites", "", "cipher suites to accept")
+	flag.BoolVar(&secureMetrics, "secureMetrics", false, "require valid bearer token for metrics scraping")
 	flag.Parse()
 
 	InitLogger(verbosity)
@@ -163,7 +166,17 @@ func main() {
 		TLSConfig:    &tlsConfig,
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disable HTTP/2
 	}
-	http.Handle("/metrics", promhttp.Handler())
+	handler := http.Handler(promhttp.Handler())
+	if secureMetrics {
+		authenticator, err := auth.NewKubeAuthenticator()
+		if err != nil {
+			log.Error(err, "failed to create authenticator")
+			os.Exit(1)
+		}
+		log.Info("metrics endpoint secured with bearer token authentication")
+		handler = auth.AuthMiddleware(authenticator, handler)
+	}
+	http.Handle("/metrics", handler)
 	if err := httpServer.ListenAndServeTLS(crtFile, keyFile); err != nil {
 		log.Error(err, "error in HTTP listen", "addr", addr)
 		os.Exit(1)

@@ -1,4 +1,4 @@
-FROM golang:1.23 AS builder
+FROM golang:1.24 AS builder
 
 USER 0
 WORKDIR  /go/src/github.com/log-file-metric-exporter
