@@ -26,6 +26,16 @@ var (
 		"VersionTLS13": tls.VersionTLS13,
 	}
 
+	// supportedTLSGroups maps OpenShift API TLS group names to Go tls.CurveID values.
+	// These names come from configv1.TLSGroup constants defined in openshift/api.
+	supportedTLSGroups = map[string]tls.CurveID{
+		"X25519":         tls.X25519,
+		"secp256r1":      tls.CurveP256,
+		"secp384r1":      tls.CurveP384,
+		"secp521r1":      tls.CurveP521,
+		"X25519MLKEM768": tls.X25519MLKEM768,
+	}
+
 	supportedCipherSuites = func() map[string]uint16 {
 		cipherSuites := map[string]uint16{}
 
@@ -91,6 +101,22 @@ func openSSLToIANACipherSuites(ciphers []string) []string {
 	return ianaCiphers
 }
 
+// parseTLSGroups converts OpenShift API TLS group names to Go tls.CurveID values.
+// Unknown groups are logged and skipped.
+func parseTLSGroups(groupNames []string) []tls.CurveID {
+	curvePreferences := make([]tls.CurveID, 0, len(groupNames))
+	for _, groupName := range groupNames {
+		groupName = strings.TrimSpace(groupName)
+		curveID, found := supportedTLSGroups[groupName]
+		if !found {
+			log.Error(errors.New("unsupported TLS group"), "unsupported TLS group", "group", groupName)
+		} else {
+			curvePreferences = append(curvePreferences, curveID)
+		}
+	}
+	return curvePreferences
+}
+
 func InitLogger(verbosity int) {
 	logger := logv2.NewLogger("log-file-metric-exporter", logv2.WithVerbosity(verbosity))
 	log.SetLogger(logger)
@@ -106,6 +132,7 @@ func main() {
 		tlsMinVersion string
 		cipherSuites  string
 		secureMetrics bool
+		groups        string
 	)
 	flag.StringVar(&dir, "dir", logDir, "Directory containing log files")
 	flag.IntVar(&verbosity, "verbosity", 0, "set verbosity level")
@@ -115,6 +142,7 @@ func main() {
 	flag.StringVar(&tlsMinVersion, "tlsMinVersion", "", "minimal TLS version to accept")
 	flag.StringVar(&cipherSuites, "cipherSuites", "", "cipher suites to accept")
 	flag.BoolVar(&secureMetrics, "secureMetrics", false, "require valid bearer token for metrics scraping")
+	flag.StringVar(&groups, "groups", "", "TLS groups/curves to use for key exchange (e.g. X25519,secp256r1,secp384r1)")
 	flag.Parse()
 
 	InitLogger(verbosity)
@@ -158,6 +186,12 @@ func main() {
 			}
 		}
 		tlsConfig.CipherSuites = cipherSuiteIds
+	}
+
+	// TLS Curves Support
+	groups = strings.TrimSpace(groups)
+	if groups != "" {
+		tlsConfig.CurvePreferences = parseTLSGroups(strings.Split(groups, ","))
 	}
 
 	// Build a server:

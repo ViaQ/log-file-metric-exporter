@@ -10,6 +10,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
 // Scraper scrapes metrics from a HTTP endpoint
@@ -49,7 +50,7 @@ func (s *Scraper) Scrape(url string) (map[string]*dto.MetricFamily, error) {
 	if resp.Body == nil {
 		return nil, fmt.Errorf("scrape error: response has no body: %v", url)
 	}
-	parser := expfmt.TextParser{}
+	parser := expfmt.NewTextParser(model.LegacyValidation)
 	return parser.TextToMetricFamilies(resp.Body)
 }
 
