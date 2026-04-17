@@ -1,7 +1,7 @@
-package main_test
+package main
 
 import (
-	"io/ioutil"
+	"crypto/tls"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,7 +33,7 @@ func runMain(t *testing.T, dir string) {
 // Test that scraped metrics have the correct labels.
 func TestScrapeMetrics(t *testing.T) {
 	// create directories for test logs
-	tmpDir, err := ioutil.TempDir("", t.Name())
+	tmpDir, err := os.MkdirTemp("", t.Name())
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 	runMain(t, tmpDir)
@@ -54,7 +54,7 @@ func TestScrapeMetrics(t *testing.T) {
 	// Write to log and scrape metric till eventually the exporter has updated the metric.
 	data := []byte("hello\n")
 	require.Eventually(t, func() bool {
-		require.NoError(t, ioutil.WriteFile(path, data, 0600))
+		require.NoError(t, os.WriteFile(path, data, 0600))
 		if m := findMetric(); m != nil {
 			assert.Equal(t, float64(len(data)), *m.Counter.Value)
 			assert.Equal(t, scraper.Labels(m), map[string]string{
@@ -82,4 +82,81 @@ func TestScrapeMetrics(t *testing.T) {
 	// Remove the log, make sure the metric is eventually removed.
 	os.Remove(path)
 	require.Eventually(t, func() bool { return findMetric() == nil }, 10*time.Second, time.Second/10)
+}
+
+func TestParseTLSGroups(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []tls.CurveID
+	}{
+		{
+			name:     "all supported groups",
+			input:    []string{"X25519", "secp256r1", "secp384r1", "secp521r1", "X25519MLKEM768"},
+			expected: []tls.CurveID{tls.X25519, tls.CurveP256, tls.CurveP384, tls.CurveP521, tls.X25519MLKEM768},
+		},
+		{
+			name:     "single group",
+			input:    []string{"X25519"},
+			expected: []tls.CurveID{tls.X25519},
+		},
+		{
+			name:     "trims whitespace",
+			input:    []string{" secp256r1 ", " secp384r1"},
+			expected: []tls.CurveID{tls.CurveP256, tls.CurveP384},
+		},
+		{
+			name:     "skips unsupported groups",
+			input:    []string{"X25519", "unsupported", "secp256r1"},
+			expected: []tls.CurveID{tls.X25519, tls.CurveP256},
+		},
+		{
+			name:     "empty input",
+			input:    []string{},
+			expected: []tls.CurveID{},
+		},
+		{
+			name:     "post-quantum hybrid group",
+			input:    []string{"X25519MLKEM768"},
+			expected: []tls.CurveID{tls.X25519MLKEM768},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parseTLSGroups(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestOpenSSLToIANACipherSuites(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "maps known ciphers",
+			input:    []string{"ECDHE-ECDSA-AES128-GCM-SHA256", "ECDHE-RSA-AES256-GCM-SHA384"},
+			expected: []string{"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"},
+		},
+		{
+			name:     "skips unknown ciphers",
+			input:    []string{"ECDHE-ECDSA-AES128-GCM-SHA256", "UNKNOWN-CIPHER"},
+			expected: []string{"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"},
+		},
+		{
+			name:     "empty input",
+			input:    []string{},
+			expected: []string{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := openSSLToIANACipherSuites(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
 }
