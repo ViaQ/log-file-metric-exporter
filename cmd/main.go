@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -90,6 +89,19 @@ func openSSLToIANACipherSuites(ciphers []string) []string {
 	ianaCiphers := make([]string, 0, len(ciphers))
 
 	for _, c := range ciphers {
+		if strings.HasPrefix(c, "TLS_") {
+			// TLS 1.3 ciphers are not configurable in Go — they are always
+			// enabled automatically when TLS 1.3 is negotiated. Skipping
+			// from the explicit cipher list does not disable them.
+			log.Info("skipping TLS 1.3 cipher suite: automatically enabled by Go runtime", "cipherSuite", c)
+			continue
+		}
+		if strings.HasPrefix(c, "DHE-") {
+			// Go's crypto/tls does not implement the DHE key exchange.
+			// These ciphers from the TLS profile cannot be honored.
+			log.Info("ignoring cipher suite not supported by Go crypto/tls: DHE key exchange is not implemented", "cipherSuite", c)
+			continue
+		}
 		ianaCipher, found := openSSLToIANACiphersMap[c]
 		if found {
 			ianaCiphers = append(ianaCiphers, ianaCipher)
@@ -175,13 +187,13 @@ func main() {
 
 	cipherSuites = strings.TrimSpace(cipherSuites)
 	if cipherSuites != "" {
-		cipherSuiteIds := make([]uint16, 10)
-		for _, suiteName := range openSSLToIANACipherSuites(strings.Split(cipherSuites, ",")) {
+		ianaNames := openSSLToIANACipherSuites(strings.Split(cipherSuites, ","))
+		cipherSuiteIds := make([]uint16, 0, len(ianaNames))
+		for _, suiteName := range ianaNames {
 			suiteId, found := supportedCipherSuites[suiteName]
 			if !found {
 				log.Error(errors.New("unsupported cipher suite"), "unsupported cipher suite", "cipherSuite", suiteName)
 			} else {
-				fmt.Println(suiteName)
 				cipherSuiteIds = append(cipherSuiteIds, suiteId)
 			}
 		}
