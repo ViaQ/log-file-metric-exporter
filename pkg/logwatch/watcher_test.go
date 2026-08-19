@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,24 +23,27 @@ const (
 
 func setup(t *testing.T, initLog func(string)) (watcher *Watcher, path string, labels LogLabels) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", t.Name())
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		log.V(4).Info("Running test cleanup...removing dir", "dir", dir)
-		_ = os.RemoveAll(dir)
-	})
-	require.NoError(t, err)
-	path = filepath.Join(dir, logname)
+	dir, path := setupDir(t)
 	require.True(t, labels.Parse(path))
-	os.MkdirAll(filepath.Dir(path), 0700)
 	if initLog != nil {
 		initLog(path)
 	}
-	watcher, err = New(dir)
+	var err error
+	watcher, err = New(dir, 0)
 	require.NoError(t, err)
 	go watcher.Watch()
 	t.Cleanup(func() { watcher.Close() })
 	return watcher, path, labels
+}
+
+func setupDir(t *testing.T) (dir string, path string) {
+	t.Helper()
+	dir, err := ioutil.TempDir("", t.Name())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path = filepath.Join(dir, logname)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+	return dir, path
 }
 
 func getCounterValue(c prometheus.Counter) float64 {
@@ -104,6 +108,7 @@ func TestWatcherSeesAndWatchesExistingFiles(t *testing.T) {
 func writeToFile(t *testing.T, path string) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	require.NoError(t, err)
+	defer f.Close()
 	_, err = f.Write([]byte(data))
 	require.NoError(t, err)
 }
@@ -128,11 +133,161 @@ func TestIgnoresSymlinkTargetOutsideRoot(t *testing.T) {
 	require.NoError(t, os.Symlink(secret, link))
 
 	// New() runs the initial Walk, which calls Update on the symlink.
-	w, err := New(dir)
+	w, err := New(dir, 0)
 	require.NoError(t, err)
 	t.Cleanup(func() { w.Close() })
 
 	counter, err := w.metrics.GetMetricWithLabelValues(l.Namespace, l.Name, l.UUID, l.Container)
 	require.NoError(t, err)
 	assert.Equal(t, float64(0), getCounterValue(counter), "must not count bytes from an out-of-root symlink target")
+}
+
+func TestUpdateIgnoresDirectoryWithoutCreatingSeries(t *testing.T) {
+	dir, _ := setupDir(t)
+
+	// A path that parses as LogLabels but is itself a directory.
+	p := filepath.Join(dir, "myns_mypod_9a5888d1-e009-4cc3-bc19-c5543b4b84f7/mycontainer/2.log")
+	require.NoError(t, os.MkdirAll(p, 0700))
+
+	w, err := New(dir, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { w.Close() })
+
+	require.NoError(t, w.Update(p))
+
+	// No series should exist for a directory path.
+	assert.Equal(t, 0, testutil.CollectAndCount(w.metrics))
+}
+
+func TestReconcilePrunesStaleTuple(t *testing.T) {
+	dir, path := setupDir(t)
+	require.NoError(t, ioutil.WriteFile(path, []byte(data), 0600))
+
+	w, err := New(dir, 0) // timer disabled; call reconcile manually
+	require.NoError(t, err)
+	t.Cleanup(func() { w.Close() })
+
+	// New's initial walk populated one series.
+	require.Equal(t, 1, testutil.CollectAndCount(w.metrics))
+
+	// Simulate a missed Remove: delete the pod dir from disk WITHOUT events.
+	podDir := filepath.Join(dir,
+		"openshift-monitoring_prometheus-k8s-0_9a5888d1-e009-4cc3-bc19-c5543b4b84f7")
+	require.NoError(t, os.RemoveAll(podDir))
+
+	w.reconcile()
+
+	assert.Equal(t, 0, testutil.CollectAndCount(w.metrics))
+	var l LogLabels
+	require.True(t, l.Parse(path))
+	w.mutex.RLock()
+	_, ok := w.sizes[l]
+	w.mutex.RUnlock()
+	assert.False(t, ok, "sizes entry should be pruned")
+}
+
+func TestPruneKeepsPodStillOnDisk(t *testing.T) {
+	// Simulates the walk/prune race: a pod present on disk but absent from the
+	// (stale) live set must NOT be pruned, thanks to the existence re-check.
+	dir, path := setupDir(t)
+	require.NoError(t, ioutil.WriteFile(path, []byte(data), 0600))
+
+	w, err := New(dir, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { w.Close() })
+	require.Equal(t, 1, testutil.CollectAndCount(w.metrics))
+
+	// Prune with an EMPTY live set (as if the walk missed this pod). The pod's
+	// files still exist on disk, so podDirExists must protect it.
+	w.prune(map[LogLabels]struct{}{})
+
+	assert.Equal(t, 1, testutil.CollectAndCount(w.metrics))
+}
+
+func TestReconcileLoopPrunesOnTimer(t *testing.T) {
+	dir, path := setupDir(t)
+	require.NoError(t, ioutil.WriteFile(path, []byte(data), 0600))
+
+	w, err := New(dir, 50*time.Millisecond)
+	require.NoError(t, err)
+	t.Cleanup(func() { w.Close() })
+	require.Equal(t, 1, testutil.CollectAndCount(w.metrics))
+
+	// Delete the pod dir from disk without emitting events.
+	podDir := filepath.Join(dir,
+		"openshift-monitoring_prometheus-k8s-0_9a5888d1-e009-4cc3-bc19-c5543b4b84f7")
+	require.NoError(t, os.RemoveAll(podDir))
+
+	// The timer-driven reconcile should prune the stale series.
+	assert.Eventually(t, func() bool {
+		return testutil.CollectAndCount(w.metrics) == 0
+	}, 2*time.Second, 20*time.Millisecond, "stale series should be pruned by the loop")
+}
+
+func TestWatchReturnsAfterClose(t *testing.T) {
+	// Regression: Watch's loop had no exit condition, so after Close each
+	// worker got io.EOF, returned instantly, and the loop respawned forever —
+	// a busy-looping goroutine leak per watcher. Under -count/-cpu 1 the leaked
+	// spinners starved the inotify-based tests past their Eventually windows.
+	dir, _ := setupDir(t)
+
+	w, err := New(dir, 0)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() { _ = w.Watch(); close(done) }()
+
+	// Let Watch spin up its worker goroutines before closing.
+	time.Sleep(50 * time.Millisecond)
+	w.Close()
+
+	select {
+	case <-done:
+		// Watch returned: no infinite respawn loop.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not return after Close; goroutine leaked")
+	}
+}
+
+func TestTriggerReconcileDrivesLoopPrune(t *testing.T) {
+	// The inotify-overflow branch in processNextEvent calls triggerReconcile();
+	// this exercises that path end-to-end: an on-demand trigger must make the
+	// reconcileLoop run a full reconcile that prunes stale series. (Fabricating
+	// a real inotify queue overflow is not feasible in a unit test.)
+	dir, path := setupDir(t)
+	require.NoError(t, ioutil.WriteFile(path, []byte(data), 0600))
+
+	w, err := New(dir, 0) // timer disabled; only the on-demand trigger drives reconcile
+	require.NoError(t, err)
+	t.Cleanup(func() { w.Close() })
+	require.Equal(t, 1, testutil.CollectAndCount(w.metrics))
+
+	// Delete the pod dir from disk without emitting events, then request a
+	// reconcile the same way the overflow handler does.
+	podDir := filepath.Join(dir,
+		"openshift-monitoring_prometheus-k8s-0_9a5888d1-e009-4cc3-bc19-c5543b4b84f7")
+	require.NoError(t, os.RemoveAll(podDir))
+
+	w.triggerReconcile()
+
+	assert.Eventually(t, func() bool {
+		return testutil.CollectAndCount(w.metrics) == 0
+	}, 2*time.Second, 20*time.Millisecond, "on-demand trigger should drive a reconcile that prunes")
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	dir, _ := setupDir(t)
+
+	w, err := New(dir, 0)
+	require.NoError(t, err)
+
+	w.Close()
+	assert.NotPanics(t, func() { w.Close() }, "second Close must not panic")
+}
+
+func TestTriggerReconcileCoalesces(t *testing.T) {
+	w := &Watcher{reconcileNow: make(chan struct{}, 1)}
+	w.triggerReconcile()
+	w.triggerReconcile() // second call must not block or panic
+	assert.Equal(t, 1, len(w.reconcileNow), "reconcile requests should coalesce to one")
 }
