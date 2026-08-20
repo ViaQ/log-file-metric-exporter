@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	logv2 "github.com/ViaQ/logerr/v2/log"
 	log "github.com/ViaQ/logerr/v2/log/static"
@@ -208,9 +209,13 @@ func main() {
 
 	// Build a server:
 	httpServer := http.Server{
-		Addr:         addr,
-		TLSConfig:    &tlsConfig,
-		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disable HTTP/2
+		Addr:              addr,
+		TLSConfig:         &tlsConfig,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		TLSNextProto:      make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disable HTTP/2
 	}
 	handler := http.Handler(promhttp.Handler())
 	if secureMetrics {
