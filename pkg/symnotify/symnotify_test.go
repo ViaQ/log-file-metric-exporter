@@ -33,7 +33,7 @@ func NewFixture(t *testing.T) *Fixture {
 	for _, dir := range []string{f.Logs, f.Targets} {
 		require.NoError(t, os.Mkdir(dir, os.ModePerm))
 	}
-	f.Watcher, err = symnotify.NewWatcher()
+	f.Watcher, err = symnotify.NewWatcher(f.Root)
 	require.NoError(t, err)
 	t.Cleanup(func() { f.Watcher.Close() })
 	return f
@@ -247,4 +247,32 @@ func TestWatchesSubdirectories(t *testing.T) {
 	if errw == nil && nw > 0 {
 		assert.Equal(f.Event(), symnotify.Event{Name: log4, Op: symnotify.Write})
 	}
+}
+
+func TestConfinesSymlinkTargetsToRoot(t *testing.T) {
+	f := NewFixture(t)
+	assert, require := assert.New(t), require.New(t)
+	require.NoError(f.Watcher.Add(f.Logs))
+
+	// In-tree symlink: target under the watch root -> allowed.
+	inTree, _ := f.Link("in-tree") // target lives under f.Targets (inside f.Root)
+	assert.True(f.Watcher.Within(inTree), "symlink with in-root target must be allowed")
+
+	// Out-of-tree symlink: target outside the watch root -> refused.
+	outside := t.TempDir() // sibling temp dir, not under f.Root
+	target, err := os.Create(Join(outside, "secret"))
+	require.NoError(err)
+	t.Cleanup(func() { _ = target.Close() })
+	evil := Join(f.Logs, "evil")
+	require.NoError(os.Symlink(target.Name(), evil))
+	assert.False(f.Watcher.Within(evil), "symlink with out-of-root target must be refused")
+
+	// Broken symlink (target cannot be resolved) -> refused, fail-closed.
+	broken := Join(f.Logs, "broken")
+	require.NoError(os.Symlink(Join(outside, "does-not-exist"), broken))
+	assert.False(f.Watcher.Within(broken), "unresolvable symlink must be refused")
+
+	// A real file under the root -> allowed.
+	real, _ := f.Create(Join(f.Logs, "real.log"))
+	assert.True(f.Watcher.Within(real), "real file under root must be allowed")
 }

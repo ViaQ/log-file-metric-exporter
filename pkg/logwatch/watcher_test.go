@@ -107,3 +107,32 @@ func writeToFile(t *testing.T, path string) {
 	_, err = f.Write([]byte(data))
 	require.NoError(t, err)
 }
+
+func TestIgnoresSymlinkTargetOutsideRoot(t *testing.T) {
+	dir, err := ioutil.TempDir("", t.Name())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	// A secret file outside the watch root, with content whose size must never be counted.
+	outside, err := ioutil.TempDir("", t.Name()+"-outside")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(outside) })
+	secret := filepath.Join(outside, "secret")
+	require.NoError(t, ioutil.WriteFile(secret, []byte("leak-me\n"), 0600))
+
+	// A pod-log-shaped symlink under the watch root pointing at the secret.
+	var l LogLabels
+	link := filepath.Join(dir, logname)
+	require.True(t, l.Parse(link))
+	require.NoError(t, os.MkdirAll(filepath.Dir(link), 0700))
+	require.NoError(t, os.Symlink(secret, link))
+
+	// New() runs the initial Walk, which calls Update on the symlink.
+	w, err := New(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { w.Close() })
+
+	counter, err := w.metrics.GetMetricWithLabelValues(l.Namespace, l.Name, l.UUID, l.Container)
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), getCounterValue(counter), "must not count bytes from an out-of-root symlink target")
+}
