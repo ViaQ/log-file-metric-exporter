@@ -93,6 +93,31 @@ misfires constantly, and how often depends on how the five goroutines interleave
 — which is why identical generators drift apart. Because a counter only goes up,
 the error accumulates and never corrects.
 
+### After the rewrite
+
+Events are handled on one goroutine, so observations for a file arrive in the
+order they were taken and the "truncated" branch only fires on a real
+truncation. The same script, the same load:
+
+```
+  pod               on_disk       reported    ratio
+  gen-1            14443826       14443826    1.00x
+  gen-2            14444102       14444102    1.00x
+  gen-3            14443274       14429759    1.00x
+  gen-4            14443090       14443090    1.00x
+  gen-5            14443182       14443182    1.00x
+  gen-6            14442860       14442121    1.00x
+  gen-7            14443182       14443182    1.00x
+  gen-8            14443182       14434825    1.00x
+  TOTAL           115546698      115524087    1.00x
+```
+
+Five of the eight agree with `stat` to the byte, and the rest are a few
+kilobytes short out of fourteen megabytes: that is what was written after each
+file's last event, which the next event's `stat` picks up. The shortfall is
+self-correcting in a way the inflation above is not, and unlike the inflation it
+does not vary by an order of magnitude between runs.
+
 ## 2. One event per write
 
 An `IN_MODIFY` watch reports every write, so the event rate is whatever the
@@ -117,6 +142,21 @@ go test -v -run TestEventVolume ./test/watchvolume/
 Exactly one event per write. The kernel queues all 60000 whatever the reader is
 doing, so a reader that cannot keep up falls behind by the difference rather
 than being throttled.
+
+### After the rewrite
+
+Watching with `IN_ONESHOT` means a watch reports the first write and removes
+itself, so writes landing before the exporter re-arms produce nothing. Volume
+follows the re-arm rate instead of the log rate:
+
+```
+  idle reader:  12792 events (0.21 per write), 0 overflows
+  busy reader:    217 events (0.00 per write), 0 overflows
+```
+
+A busier reader now sees *fewer* events rather than falling further behind. No
+bytes are lost with those events: the handler stats the file, so one event still
+accounts for every write behind it.
 
 ## 3. The queue overflows and the backlog is discarded
 
@@ -190,3 +230,23 @@ node running 250 pods that each log a modest 400 lines a second aggregates to
 period is 100 ms, so a CPU-limited exporter is descheduled for something close to
 its entire budget as a matter of routine. Nothing about that requires a pod
 behaving badly; it follows from how many pods share the node.
+
+### After the rewrite
+
+Because a fired watch removes itself and is re-armed only when the exporter gets
+to it, the backlog cannot exceed one pending event per watched file. The same
+three rounds, the same four-second stalls:
+
+```
+  104303400 writes -> 600 events delivered, 0 overflows
+```
+
+600 events is exactly one per watched file per round. 104 million writes left the
+queue nowhere near its 16384 cap, so there was no backlog to discard.
+
+This is what removes the density problem above rather than merely improving the
+numbers. The 16384/R budget applies when the backlog grows with the write rate.
+Under IN_ONESHOT the ceiling is the number of watched files, so a pause costs the
+exporter at most one event per file however long it lasts and however many pods
+share the node. A four-second stall is survivable for the same reason a 100 ms
+one is: neither can produce more than one pending event per file.

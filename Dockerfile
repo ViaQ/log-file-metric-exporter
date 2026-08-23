@@ -7,7 +7,7 @@ COPY ./go.mod ./go.sum ./
 RUN go mod download
 COPY Makefile ./
 COPY ./cmd ./cmd
-COPY ./pkg ./pkg
+COPY ./internal ./internal
 
 RUN make build
 
@@ -28,5 +28,5 @@ LABEL \
         io.openshift.maintainer.component="Logging" \
         version="v${BUILD_VERSION}"
 
-CMD ["/usr/local/bin/log-file-metric-exporter", "-verbosity=2", "-dir=/var/log/containers", "-http=:2112"]
+CMD ["/usr/local/bin/log-file-metric-exporter", "-verbosity=2", "-dir=/var/log/pods", "-http=:2112"]
 

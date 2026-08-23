@@ -1,18 +1,23 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"flag"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	logv2 "github.com/ViaQ/logerr/v2/log"
 	log "github.com/ViaQ/logerr/v2/log/static"
-	"github.com/log-file-metric-exporter/pkg/auth"
-	"github.com/log-file-metric-exporter/pkg/logwatch"
+	"github.com/log-file-metric-exporter/internal/auth"
+	"github.com/log-file-metric-exporter/internal/metrics"
+	"github.com/log-file-metric-exporter/internal/watcher"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -161,14 +166,23 @@ func main() {
 	InitLogger(verbosity)
 	log.Info("start log metric exporter", "path", dir)
 
-	w, err := logwatch.New(dir)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
+	m := metrics.New()
+	if err := m.Register(prometheus.DefaultRegisterer); err != nil {
+		log.Error(err, "failed to register metrics")
+		os.Exit(1)
+	}
+
+	w, err := watcher.New(dir, m)
 	if err != nil {
 		log.Error(err, "watch error", "path", dir)
 		os.Exit(1)
 	}
 	defer w.Close()
 	go func() {
-		if err := w.Watch(); err != nil {
+		if err := w.Start(ctx); err != nil && ctx.Err() == nil {
 			log.Error(err, "error in watch", "path", dir)
 			os.Exit(1)
 		}
@@ -228,7 +242,17 @@ func main() {
 		handler = auth.AuthMiddleware(authenticator, handler)
 	}
 	http.Handle("/metrics", handler)
-	if err := httpServer.ListenAndServeTLS(crtFile, keyFile); err != nil {
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			log.Error(err, "error shutting down HTTP server")
+		}
+	}()
+
+	if err := httpServer.ListenAndServeTLS(crtFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error(err, "error in HTTP listen", "addr", addr)
 		os.Exit(1)
 	}
