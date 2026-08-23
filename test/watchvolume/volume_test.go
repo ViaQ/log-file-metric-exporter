@@ -1,17 +1,18 @@
 // Package watchvolume measures how many inotify events the watcher receives for
 // a given amount of logging.
 //
-// The watcher asks for IN_MODIFY, which the kernel reports for every write. The
-// event rate is therefore whatever the containers on the node happen to log,
-// and the exporter has no say in it. The inotify queue holds
-// fs.inotify.max_queued_events entries (16384 by default); when it fills, the
-// kernel discards the backlog and reports a single IN_Q_OVERFLOW. See
-// overflow_test.go for that failure, and docs/watcher-defects.md for the
-// measurements this test produced.
+// The watcher asks for IN_ONESHOT, so a watch reports the first write and then
+// removes itself. Writes that land before the exporter re-arms produce nothing
+// at all, which means event volume follows the re-arm rate rather than whatever
+// the containers happen to log. That is what keeps the inotify queue bounded:
+// see overflow_test.go, and docs/watcher-defects.md for what the IN_MODIFY
+// watcher this replaced produced on the same workload.
+//
+// Nothing is lost by that coalescing. The handler stats the file, so one event
+// still accounts for every write behind it.
 package watchvolume
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,8 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-	"github.com/log-file-metric-exporter/pkg/symnotify"
+	"github.com/log-file-metric-exporter/internal/inotify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,45 +81,50 @@ func writeBurst(t *testing.T, files []string) {
 	}
 }
 
-// runWatcher drives the watcher this repository ships, counting what it sees.
+// runWatcher drives the watcher this repository ships, re-arming after every
+// event exactly as the watcher package does in production.
 func runWatcher(t *testing.T, perEvent time.Duration) volumeResult {
 	t.Helper()
 	root, files := makeFiles(t)
 
-	w, err := symnotify.NewWatcher()
+	n, err := inotify.New(root)
 	require.NoError(t, err)
-	require.NoError(t, w.Add(root))
+	for _, f := range files {
+		require.NoError(t, n.WatchLogFile(f))
+	}
+	go n.ReadLoop()
 
 	var events, overflows atomic.Int64
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for {
-			if _, err := w.Event(); err != nil {
-				if errors.Is(err, fsnotify.ErrEventOverflow) {
-					overflows.Add(1)
-					continue
-				}
-				return // watcher closed
+		for e := range n.Events() {
+			if e.IsOverFlowErr() {
+				overflows.Add(1)
+				continue
+			}
+			if !e.IsModify() && !e.IsCloseWrite() {
+				continue
 			}
 			events.Add(1)
 			if perEvent > 0 {
 				time.Sleep(perEvent)
 			}
+			_ = n.WatchLogFile(e.Path)
 		}
 	}()
 
 	writeBurst(t, files)
 	time.Sleep(volSettle)
-	_ = w.Close()
+	_ = n.Close()
 	<-done
 
 	return volumeResult{events: events.Load(), overflows: overflows.Load()}
 }
 
-// TestEventVolume records how much the watcher is asked to handle. One event per
-// write means the load is set by the containers, not by the exporter, and a
-// reader that cannot keep up simply falls behind by the difference.
+// TestEventVolume records how much the watcher is asked to handle. Under
+// IN_ONESHOT the count is set by how fast the exporter re-arms, so a busier
+// reader sees fewer events rather than falling further behind.
 func TestEventVolume(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping event volume measurement in short mode")
@@ -133,11 +138,12 @@ func TestEventVolume(t *testing.T) {
 		idle.events, idle.perWrite(), idle.overflows)
 	t.Logf("  busy reader: %6d events (%.2f per write), %d overflows",
 		busy.events, busy.perWrite(), busy.overflows)
-	t.Logf("backlog under a busy reader: %d of %d generated events never consumed",
-		idle.events-busy.events, idle.events)
 
-	assert.Greater(t, idle.perWrite(), 0.9,
-		"expected roughly one event per write from an IN_MODIFY watch")
+	require.Positive(t, idle.events, "the watcher reported nothing at all")
+	assert.Less(t, idle.perWrite(), 0.9,
+		"expected fewer events than writes; a ONESHOT watch should coalesce a burst")
+	assert.Less(t, busy.events, idle.events,
+		"a slower reader should re-arm less often and so see fewer events, not more")
 }
 
 func queueCapacity(t *testing.T) string {

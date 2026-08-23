@@ -1,31 +1,31 @@
 package watchvolume
 
 import (
-	"errors"
 	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-	"github.com/log-file-metric-exporter/pkg/symnotify"
+	"github.com/log-file-metric-exporter/internal/inotify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // The inotify queue holds fs.inotify.max_queued_events entries (16384 by
-// default). An IN_MODIFY watch enqueues one event per write, so the only thing
-// keeping the queue below the cap is the exporter draining it faster than the
-// containers fill it. Nothing enforces that. When it stops holding, the kernel
-// discards the backlog, reports a single IN_Q_OVERFLOW, and the byte counts
-// those events represented are gone for good.
+// default). The IN_MODIFY watcher this replaced enqueued one event per write,
+// so nothing bounded the backlog except the exporter keeping up; when that
+// stopped holding, the kernel discarded the backlog and the byte counts behind
+// it were gone. docs/watcher-defects.md has that measurement.
 //
-// Each round below stops reading for a few seconds while writers hammer. The
-// stall is deliberate and larger than anything routine — it stands in for a
-// severe pause, and makes the failure reproducible in a few seconds rather than
-// requiring a sustained overload. The point it demonstrates is structural: the
-// backlog is bounded by the write rate, which the exporter does not control.
+// A ONESHOT watch removes itself after the first event, so a file with an
+// unhandled event contributes nothing further however hard it is written. The
+// backlog is bounded by the number of watched files rather than by the write
+// rate, which is why the queue cannot run away.
+//
+// This test applies the load that broke the old watcher: the reader stops for
+// seconds at a time while writers hammer. The stall is deliberate and larger
+// than anything routine.
 
 const (
 	ovfWriters = 4
@@ -96,42 +96,48 @@ func overflowRound(t *testing.T) overflowResult {
 	t.Helper()
 	root, files := makeFiles(t)
 
-	w, err := symnotify.NewWatcher()
+	n, err := inotify.New(root)
 	require.NoError(t, err)
-	require.NoError(t, w.Add(root))
+	for _, f := range files {
+		require.NoError(t, n.WatchLogFile(f))
+	}
 
+	// ReadLoop only starts once the burst is over, so nothing is draining the
+	// kernel queue during the stall.
 	stop := make(chan struct{})
 	wait := hammer(files, stop)
-	time.Sleep(ovfStall) // nothing is reading the queue
+	time.Sleep(ovfStall)
 	close(stop)
 	res := overflowResult{writes: wait()}
 	time.Sleep(ovfSettle)
 
 	var delivered, overflows int64
 	drained := make(chan struct{})
+	go n.ReadLoop()
 	go func() {
 		defer close(drained)
-		for {
-			if _, err := w.Event(); err != nil {
-				if errors.Is(err, fsnotify.ErrEventOverflow) {
-					atomic.AddInt64(&overflows, 1)
-					continue
-				}
-				return // watcher closed
+		for e := range n.Events() {
+			if e.IsOverFlowErr() {
+				atomic.AddInt64(&overflows, 1)
+				continue
+			}
+			if !e.IsModify() && !e.IsCloseWrite() {
+				continue
 			}
 			atomic.AddInt64(&delivered, 1)
+			_ = n.WatchLogFile(e.Path)
 		}
 	}()
 	time.Sleep(ovfDrain)
-	_ = w.Close() // unblocks the drain goroutine
+	_ = n.Close()
 	<-drained
 
 	res.delivered, res.overflows = atomic.LoadInt64(&delivered), atomic.LoadInt64(&overflows)
 	return res
 }
 
-// TestQueueOverflowUnderLoad shows the queue overflowing and the backlog being
-// thrown away. Heavy, and skipped in short mode.
+// TestQueueOverflowUnderLoad applies the load that overflowed the queue for the
+// IN_MODIFY watcher. Heavy, and skipped in short mode.
 func TestQueueOverflowUnderLoad(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping heavy queue overflow test in short mode")
@@ -146,10 +152,10 @@ func TestQueueOverflowUnderLoad(t *testing.T) {
 		queueCapacity(t), volFiles, ovfRounds, ovfStall)
 	t.Logf("  %d writes -> %d events delivered, %d overflows",
 		total.writes, total.delivered, total.overflows)
-	t.Logf("  the events behind each overflow were discarded by the kernel; the bytes")
-	t.Logf("  they represented are not recoverable from any later event")
 
 	require.Positive(t, total.writes, "the writers produced nothing")
-	assert.Positive(t, total.overflows,
-		"expected the IN_MODIFY watch to overflow the inotify queue under load")
+	assert.Zero(t, total.overflows,
+		"a ONESHOT watch holds at most one pending event per file, so the queue should stay far below the cap")
+	assert.LessOrEqual(t, total.delivered, int64(volFiles*ovfRounds),
+		"delivered more events than there are watched files, so a watch fired more than once")
 }

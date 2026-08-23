@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/log-file-metric-exporter/pkg/auth"
+	"github.com/log-file-metric-exporter/internal/auth"
 	"github.com/log-file-metric-exporter/test/scraper"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
