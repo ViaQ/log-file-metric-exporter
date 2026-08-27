@@ -137,15 +137,16 @@ func InitLogger(verbosity int) {
 
 func main() {
 	var (
-		dir           string
-		addr          string
-		crtFile       string
-		keyFile       string
-		verbosity     int
-		tlsMinVersion string
-		cipherSuites  string
-		secureMetrics bool
-		groups        string
+		dir               string
+		addr              string
+		crtFile           string
+		keyFile           string
+		verbosity         int
+		tlsMinVersion     string
+		cipherSuites      string
+		secureMetrics     bool
+		groups            string
+		reconcileInterval time.Duration
 	)
 	flag.StringVar(&dir, "dir", logDir, "Directory containing log files")
 	flag.IntVar(&verbosity, "verbosity", 0, "set verbosity level")
@@ -156,12 +157,20 @@ func main() {
 	flag.StringVar(&cipherSuites, "cipherSuites", "", "cipher suites to accept")
 	flag.BoolVar(&secureMetrics, "secureMetrics", false, "require valid bearer token for metrics scraping")
 	flag.StringVar(&groups, "groups", "", "TLS groups/curves to use for key exchange (e.g. X25519,secp256r1,secp384r1)")
+	flag.DurationVar(&reconcileInterval, "reconcileInterval", 5*time.Minute,
+		"interval for full disk reconcile to prune stale metrics; 0 disables the timer")
 	flag.Parse()
 
 	InitLogger(verbosity)
+
+	if reconcileInterval < 0 {
+		log.Error(errors.New("reconcileInterval must not be negative"), "reconcileInterval must not be negative", "reconcileInterval", reconcileInterval)
+		os.Exit(1)
+	}
+
 	log.Info("start log metric exporter", "path", dir)
 
-	w, err := logwatch.New(dir)
+	w, err := logwatch.New(dir, reconcileInterval)
 	if err != nil {
 		log.Error(err, "watch error", "path", dir)
 		os.Exit(1)
