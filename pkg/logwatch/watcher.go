@@ -44,7 +44,7 @@ type Watcher struct {
 func New(dir string) (*Watcher, error) {
 	log.V(3).Info("Initializing a new watcher...")
 	//Get new watcher
-	watcher, err := symnotify.NewWatcher()
+	watcher, err := symnotify.NewWatcher(dir)
 	if err != nil {
 		return nil, fmt.Errorf("error creating watcher: %w", err)
 	}
@@ -135,6 +135,10 @@ func (w *Watcher) Update(path string) (err error) {
 	var l LogLabels
 	if !l.Parse(path) {
 		log.V(3).Info("Unable to parse path for LogLabels. returning early from update", "path", path)
+		return nil
+	}
+	if !w.watcher.Within(path) {
+		log.V(2).Info("refusing to stat symlink target outside root", "path", path)
 		return nil
 	}
 	counter, err := w.metrics.GetMetricWithLabelValues(l.Namespace, l.Name, l.UUID, l.Container)

@@ -18,7 +18,7 @@ import (
 // go test -memprofile=mem.prof -run X -bench BenchmarkStress -benchtime=5m
 func BenchmarkStress(b *testing.B) {
 	dir := b.TempDir()
-	w, err := symnotify.NewWatcher()
+	w, err := symnotify.NewWatcher(dir)
 	require.NoError(b, err)
 	require.NoError(b, w.Add(dir))
 	files := make([]*os.File, 512)
