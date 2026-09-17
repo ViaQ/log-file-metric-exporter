@@ -1,4 +1,4 @@
-FROM golang:1.25 AS builder
+FROM golang:1.26.7 AS builder
 
 USER 0
 WORKDIR  /go/src/github.com/log-file-metric-exporter
@@ -11,7 +11,7 @@ COPY ./pkg ./pkg
 
 RUN make build
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal
+FROM registry.access.redhat.com/ubi9/ubi-micro
 
 ARG BUILD_VERSION=1.2.0
 

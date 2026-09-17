@@ -1,4 +1,4 @@
-FROM registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:v1.25.9-202604271511.p0.g207b799.el9 AS builder
+FROM registry.redhat.io/openshift/golang-builder:golang-builder-v1.26-rhel9 AS builder
 
 ENV GOEXPERIMENT=strictfipsruntime
 ENV CGO_ENABLED=1
@@ -8,7 +8,7 @@ WORKDIR /opt/app-root/src
 
 RUN make build LDFLAGS="-tags strictfipsruntime -ldflags '-s -w'"
 
-FROM registry.redhat.io/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi-micro
 
 COPY --from=builder /opt/app-root/src/bin/log-file-metric-exporter  /usr/local/bin/.
 
