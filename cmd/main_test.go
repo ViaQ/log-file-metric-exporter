@@ -2,6 +2,9 @@ package main
 
 import (
 	"crypto/tls"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +12,13 @@ import (
 	"testing"
 	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
+
+	"github.com/log-file-metric-exporter/pkg/auth"
 	"github.com/log-file-metric-exporter/test/scraper"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
@@ -17,10 +27,76 @@ import (
 
 const url = "https://localhost:2112/metrics"
 
+// fakeAuthFactory returns a newAuth factory whose authenticator is backed by a
+// fake Kubernetes clientset: TokenReview reports `authenticated`, SubjectAccessReview
+// reports `allowed`. Mirrors the reactor setup in pkg/auth/auth_test.go.
+func fakeAuthFactory(authenticated, allowed bool) func() (*auth.KubeAuthenticator, error) {
+	return func() (*auth.KubeAuthenticator, error) {
+		fc := fake.NewClientset()
+		fc.PrependReactor("create", "tokenreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, &authenticationv1.TokenReview{
+				Status: authenticationv1.TokenReviewStatus{
+					Authenticated: authenticated,
+					User:          authenticationv1.UserInfo{Username: "system:serviceaccount:openshift-monitoring:prometheus-k8s"},
+				},
+			}, nil
+		})
+		fc.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, &authorizationv1.SubjectAccessReview{
+				Status: authorizationv1.SubjectAccessReviewStatus{Allowed: allowed, Reason: "test"},
+			}, nil
+		})
+		return auth.NewKubeAuthenticatorWithClient(fc), nil
+	}
+}
+
+func serve(t *testing.T, h http.Handler, authHeader string) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+func TestMetricsHandler_SecureRejectsTokenless(t *testing.T) {
+	h, err := metricsHandler(true, fakeAuthFactory(true, true))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, serve(t, h, ""))
+}
+
+func TestMetricsHandler_SecureAllowsValidToken(t *testing.T) {
+	h, err := metricsHandler(true, fakeAuthFactory(true, true))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, serve(t, h, "Bearer valid-token"))
+}
+
+func TestMetricsHandler_SecureForbidsUnauthorized(t *testing.T) {
+	h, err := metricsHandler(true, fakeAuthFactory(true, false))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, serve(t, h, "Bearer valid-token"))
+}
+
+func TestMetricsHandler_InsecureServesWithoutToken(t *testing.T) {
+	// newAuth must NOT be called when secureMetrics is false.
+	notCalled := func() (*auth.KubeAuthenticator, error) { return nil, fmt.Errorf("newAuth must not be called") }
+	h, err := metricsHandler(false, notCalled)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, serve(t, h, ""))
+}
+
+func TestMetricsHandler_SecureAuthFactoryError(t *testing.T) {
+	boom := func() (*auth.KubeAuthenticator, error) { return nil, fmt.Errorf("no in-cluster config") }
+	_, err := metricsHandler(true, boom)
+	assert.Error(t, err)
+}
+
 // runMain runs the metric exporter watching dir.
 func runMain(t *testing.T, dir string) {
 	t.Helper()
-	cmd := exec.Command("go", "run", "main.go", "-dir="+dir, "-crtFile=testdata/server.crt", "-keyFile=testdata/server.key")
+	cmd := exec.Command("go", "run", "main.go", "-dir="+dir, "-crtFile=testdata/server.crt", "-keyFile=testdata/server.key", "-secureMetrics=false")
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // create session so we can kill go run and sub-processes
 	require.NoError(t, cmd.Start())
@@ -159,4 +235,9 @@ func TestOpenSSLToIANACipherSuites(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func TestSecureMetricsDefaultsTrue(t *testing.T) {
+	assert.True(t, defaultSecureMetrics,
+		"secureMetrics must default to true so the exporter is fail-closed (LOG-9761)")
 }

@@ -16,6 +16,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// defaultSecureMetrics makes the exporter fail-closed by default: the /metrics
+// endpoint requires a valid bearer token unless -secureMetrics=false is passed
+// explicitly (dev-only opt-out). See LOG-9761.
+const defaultSecureMetrics = true
+
 var (
 	logDir = "/var/log/pods"
 
@@ -135,6 +140,23 @@ func InitLogger(verbosity int) {
 	log.SetLogger(logger)
 }
 
+// metricsHandler builds the /metrics handler. When secureMetrics is true it
+// obtains a Kubernetes authenticator via newAuth and wraps the handler with
+// bearer-token auth middleware; when false it returns the unauthenticated
+// Prometheus handler. newAuth is injected so tests can supply a fake.
+func metricsHandler(secureMetrics bool, newAuth func() (*auth.KubeAuthenticator, error)) (http.Handler, error) {
+	handler := http.Handler(promhttp.Handler())
+	if secureMetrics {
+		authenticator, err := newAuth()
+		if err != nil {
+			return nil, err
+		}
+		log.Info("metrics endpoint secured with bearer token authentication")
+		handler = auth.AuthMiddleware(authenticator, handler)
+	}
+	return handler, nil
+}
+
 func main() {
 	var (
 		dir               string
@@ -155,7 +177,7 @@ func main() {
 	flag.StringVar(&keyFile, "keyFile", "/etc/fluent/metrics/tls.key", "key file for log-file-metric-exporter service")
 	flag.StringVar(&tlsMinVersion, "tlsMinVersion", "", "minimal TLS version to accept")
 	flag.StringVar(&cipherSuites, "cipherSuites", "", "cipher suites to accept")
-	flag.BoolVar(&secureMetrics, "secureMetrics", false, "require valid bearer token for metrics scraping")
+	flag.BoolVar(&secureMetrics, "secureMetrics", defaultSecureMetrics, "require valid bearer token for metrics scraping")
 	flag.StringVar(&groups, "groups", "", "TLS groups/curves to use for key exchange (e.g. X25519,secp256r1,secp384r1)")
 	flag.DurationVar(&reconcileInterval, "reconcileInterval", 5*time.Minute,
 		"interval for full disk reconcile to prune stale metrics; 0 disables the timer")
@@ -226,15 +248,10 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		TLSNextProto:      make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disable HTTP/2
 	}
-	handler := http.Handler(promhttp.Handler())
-	if secureMetrics {
-		authenticator, err := auth.NewKubeAuthenticator()
-		if err != nil {
-			log.Error(err, "failed to create authenticator")
-			os.Exit(1)
-		}
-		log.Info("metrics endpoint secured with bearer token authentication")
-		handler = auth.AuthMiddleware(authenticator, handler)
+	handler, err := metricsHandler(secureMetrics, auth.NewKubeAuthenticator)
+	if err != nil {
+		log.Error(err, "failed to create authenticator")
+		os.Exit(1)
 	}
 	http.Handle("/metrics", handler)
 	if err := httpServer.ListenAndServeTLS(crtFile, keyFile); err != nil {
