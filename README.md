@@ -43,7 +43,9 @@ This generates a coverage report at `tmp/coverage/test-unit-coverage.html`.
 - `-tlsMinVersion` - Minimum TLS version (e.g., `VersionTLS12`, `VersionTLS13`)
 - `-cipherSuites` - Comma-separated list of OpenSSL cipher suite names
 - `-groups` - TLS groups/curves for key exchange (e.g., `X25519,secp256r1,secp384r1`)
-- `-secureMetrics` - Require valid bearer token for metrics scraping (default: `false`)
+- `-secureMetrics` - Require valid bearer token for metrics scraping (default: `true`)
+- `-authCacheTTL` - TTL for caching authentication/authorization results (default: `10s`; 0 to disable)
+- `-reconcileInterval` - Interval for full disk reconcile to prune stale metrics (default: `5m`; 0 to disable)
 - `-verbosity` - Log verbosity level (default: `0`)
 
 ## Container Operations

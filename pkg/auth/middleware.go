@@ -10,7 +10,7 @@ import (
 // AuthMiddleware wraps an http.Handler with bearer token authentication and authorization.
 // It extracts the token from the Authorization header, validates it via TokenReview,
 // and checks authorization via SubjectAccessReview before delegating to the next handler.
-func AuthMiddleware(authenticator *KubeAuthenticator, next http.Handler) http.Handler {
+func AuthMiddleware(authenticator Authenticator, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {

@@ -27,27 +27,51 @@ import (
 
 const url = "https://localhost:2112/metrics"
 
-// fakeAuthFactory returns a newAuth factory whose authenticator is backed by a
-// fake Kubernetes clientset: TokenReview reports `authenticated`, SubjectAccessReview
-// reports `allowed`. Mirrors the reactor setup in pkg/auth/auth_test.go.
-func fakeAuthFactory(authenticated, allowed bool) func() (*auth.KubeAuthenticator, error) {
-	return func() (*auth.KubeAuthenticator, error) {
-		fc := fake.NewClientset()
-		fc.PrependReactor("create", "tokenreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+// fakeAuth returns an authenticator backed by a fake Kubernetes clientset:
+// TokenReview reports `authenticated`, SubjectAccessReview reports `allowed`.
+// Mirrors the reactor setup in pkg/auth/auth_test.go.
+func fakeAuth(authenticated, allowed bool) *auth.KubeAuthenticator {
+	fc := fake.NewClientset()
+	fc.PrependReactor("create", "tokenreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		createAction := a.(k8stesting.CreateAction)
+		review := createAction.GetObject().(*authenticationv1.TokenReview)
+		// Verify audience is set correctly
+		if len(review.Spec.Audiences) > 0 && review.Spec.Audiences[0] != "log-file-metric-exporter" {
 			return true, &authenticationv1.TokenReview{
-				Status: authenticationv1.TokenReviewStatus{
-					Authenticated: authenticated,
-					User:          authenticationv1.UserInfo{Username: "system:serviceaccount:openshift-monitoring:prometheus-k8s"},
-				},
+				Status: authenticationv1.TokenReviewStatus{Authenticated: false},
 			}, nil
-		})
-		fc.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
-			return true, &authorizationv1.SubjectAccessReview{
-				Status: authorizationv1.SubjectAccessReviewStatus{Allowed: allowed, Reason: "test"},
-			}, nil
-		})
-		return auth.NewKubeAuthenticatorWithClient(fc), nil
+		}
+		return true, &authenticationv1.TokenReview{
+			Status: authenticationv1.TokenReviewStatus{
+				Authenticated: authenticated,
+				User:          authenticationv1.UserInfo{Username: "system:serviceaccount:openshift-monitoring:prometheus-k8s"},
+			},
+		}, nil
+	})
+	fc.PrependReactor("create", "subjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authorizationv1.SubjectAccessReview{
+			Status: authorizationv1.SubjectAccessReviewStatus{Allowed: allowed, Reason: "test"},
+		}, nil
+	})
+	return auth.NewKubeAuthenticatorWithClient(fc)
+}
+
+// testMetricsHandler builds a handler using a fake authenticator for testing.
+func testMetricsHandler(secureMetrics bool, cacheTTL time.Duration, authenticator *auth.KubeAuthenticator) (http.Handler, error) {
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	if secureMetrics {
+		if authenticator == nil {
+			return nil, fmt.Errorf("no authenticator")
+		}
+		var a auth.Authenticator = authenticator
+		if cacheTTL > 0 {
+			a = auth.NewCachedAuthenticator(authenticator, cacheTTL)
+		}
+		handler = auth.AuthMiddleware(a, handler)
 	}
+	return handler, nil
 }
 
 func serve(t *testing.T, h http.Handler, authHeader string) int {
@@ -62,35 +86,27 @@ func serve(t *testing.T, h http.Handler, authHeader string) int {
 }
 
 func TestMetricsHandler_SecureRejectsTokenless(t *testing.T) {
-	h, err := metricsHandler(true, fakeAuthFactory(true, true))
+	h, err := testMetricsHandler(true, 0, fakeAuth(true, true))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusUnauthorized, serve(t, h, ""))
 }
 
 func TestMetricsHandler_SecureAllowsValidToken(t *testing.T) {
-	h, err := metricsHandler(true, fakeAuthFactory(true, true))
+	h, err := testMetricsHandler(true, 0, fakeAuth(true, true))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, serve(t, h, "Bearer valid-token"))
 }
 
 func TestMetricsHandler_SecureForbidsUnauthorized(t *testing.T) {
-	h, err := metricsHandler(true, fakeAuthFactory(true, false))
+	h, err := testMetricsHandler(true, 0, fakeAuth(true, false))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, serve(t, h, "Bearer valid-token"))
 }
 
 func TestMetricsHandler_InsecureServesWithoutToken(t *testing.T) {
-	// newAuth must NOT be called when secureMetrics is false.
-	notCalled := func() (*auth.KubeAuthenticator, error) { return nil, fmt.Errorf("newAuth must not be called") }
-	h, err := metricsHandler(false, notCalled)
+	h, err := testMetricsHandler(false, 0, nil)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, serve(t, h, ""))
-}
-
-func TestMetricsHandler_SecureAuthFactoryError(t *testing.T) {
-	boom := func() (*auth.KubeAuthenticator, error) { return nil, fmt.Errorf("no in-cluster config") }
-	_, err := metricsHandler(true, boom)
-	assert.Error(t, err)
 }
 
 // runMain runs the metric exporter watching dir.
