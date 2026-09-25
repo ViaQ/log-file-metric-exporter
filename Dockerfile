@@ -18,6 +18,8 @@ ARG BUILD_VERSION=1.2.0
 COPY --from=builder /go/src/github.com/log-file-metric-exporter/bin/log-file-metric-exporter  /usr/local/bin/.
 RUN chmod +x /usr/local/bin/log-file-metric-exporter
 
+USER 65532:0
+
 LABEL \
         io.k8s.display-name="OpenShift LogFileMetric Exporter" \
         io.k8s.description="OpenShift LogFileMetric Exporter component of OpenShift Cluster Logging" \
