@@ -48,6 +48,9 @@ func (w *Watcher) reconcile() {
 	active := make([]string, 0)
 	filepath.WalkDir(w.rootDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if os.IsNotExist(err) {
+				return nil 
+			}
 			return err
 		}
 		if path == w.rootDir {
