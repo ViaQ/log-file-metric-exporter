@@ -36,7 +36,7 @@ artifactdir:
 
 fmt:
 	@gofmt -l -w cmd && \
-	gofmt -l -w pkg
+	gofmt -l -w internal
 .PHONY: fmt
 
 build: fmt
@@ -65,7 +65,7 @@ clean:
 COVERAGE_DIR=$(ARTIFACT_DIR)/coverage
 test: artifactdir
 	@mkdir -p $(COVERAGE_DIR)
-	@go test -race -coverprofile=$(COVERAGE_DIR)/test-unit.cov ./pkg/...
+	@go test -race -coverprofile=$(COVERAGE_DIR)/test-unit.cov ./internal/...
 	@go test -v ./cmd
 	@go tool cover -html=$(COVERAGE_DIR)/test-unit.cov -o $(COVERAGE_DIR)/test-unit-coverage.html
 	@go tool cover -func=$(COVERAGE_DIR)/test-unit.cov | tail -n 1
