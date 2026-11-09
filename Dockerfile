@@ -11,7 +11,23 @@ COPY ./internal ./internal
 
 RUN make build
 
+# Stage the OpenSSL backend into a staging root for the ubi-micro runtime
+# image, the same way vector-rhel9 and cluster-logging-operator do.
+# See Dockerfile.art for rationale.
+FROM registry.access.redhat.com/ubi9/ubi AS packages
+
+RUN mkdir -p /mnt/rootfs && \
+    dnf install -y --installroot=/mnt/rootfs \
+      --releasever=9 \
+      --setopt=install_weak_deps=false \
+      --nodocs \
+      openssl-libs \
+      ca-certificates && \
+    dnf --installroot=/mnt/rootfs clean all
+
 FROM registry.access.redhat.com/ubi9/ubi-micro
+
+COPY --from=packages /mnt/rootfs/ /
 
 ARG BUILD_VERSION=1.2.0
 
@@ -31,4 +47,3 @@ LABEL \
         version="v${BUILD_VERSION}"
 
 CMD ["/usr/local/bin/log-file-metric-exporter", "-verbosity=2", "-dir=/var/log/pods", "-http=:2112"]
-

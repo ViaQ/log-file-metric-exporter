@@ -8,8 +8,26 @@ WORKDIR /opt/app-root/src
 
 RUN make build LDFLAGS="-tags strictfipsruntime -ldflags '-s -w'"
 
+# Stage the OpenSSL backend required by the strictfipsruntime build into a
+# staging root, the same way vector-rhel9 provisions its ubi-micro runtime
+# image. Without these libraries the binary aborts at startup on FIPS-enabled
+# nodes with:
+#   "FIPS mode is enabled, but the required OpenSSL backend is unavailable"
+# (ubi-micro itself ships no OpenSSL.)
+FROM registry.access.redhat.com/ubi9/ubi AS packages
+
+RUN mkdir -p /mnt/rootfs && \
+    dnf install -y --installroot=/mnt/rootfs \
+      --releasever=9 \
+      --setopt=install_weak_deps=false \
+      --nodocs \
+      openssl-libs \
+      ca-certificates && \
+    dnf --installroot=/mnt/rootfs clean all
+
 FROM registry.access.redhat.com/ubi9/ubi-micro
 
+COPY --from=packages /mnt/rootfs/ /
 COPY --from=builder /opt/app-root/src/bin/log-file-metric-exporter  /usr/local/bin/.
 
 RUN chmod +x /usr/local/bin/log-file-metric-exporter
