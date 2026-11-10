@@ -241,3 +241,88 @@ func TestSecureMetricsDefaultsTrue(t *testing.T) {
 	assert.True(t, defaultSecureMetrics,
 		"secureMetrics must default to true so the exporter is fail-closed (LOG-9761)")
 }
+
+func TestSupportedTLSVersions_RejectsDeprecated(t *testing.T) {
+	deprecatedVersions := map[string]uint16{
+		"VersionTLS10": tls.VersionTLS10,
+		"VersionTLS11": tls.VersionTLS11,
+	}
+
+	for name, version := range deprecatedVersions {
+		t.Run(name, func(t *testing.T) {
+			_, found := supportedTlsVersions[name]
+			assert.False(t, found,
+				"TLS version %s (0x%04x) must not be in supportedTlsVersions (CWE-327)", name, version)
+		})
+	}
+}
+
+func TestSupportedTLSVersions_AcceptsSecure(t *testing.T) {
+	secureVersions := map[string]uint16{
+		"VersionTLS12": tls.VersionTLS12,
+		"VersionTLS13": tls.VersionTLS13,
+	}
+
+	for name, expectedVersion := range secureVersions {
+		t.Run(name, func(t *testing.T) {
+			actualVersion, found := supportedTlsVersions[name]
+			assert.True(t, found, "secure TLS version %s must be supported", name)
+			assert.Equal(t, expectedVersion, actualVersion)
+		})
+	}
+}
+
+func TestSupportedCipherSuites_ExcludesInsecure(t *testing.T) {
+	insecureSuites := tls.InsecureCipherSuites()
+	for _, suite := range insecureSuites {
+		t.Run(suite.Name, func(t *testing.T) {
+			_, found := supportedCipherSuites[suite.Name]
+			assert.False(t, found,
+				"insecure cipher suite %s (0x%04x) must not be in supportedCipherSuites (CWE-327)",
+				suite.Name, suite.ID)
+		})
+	}
+
+	assert.Greater(t, len(insecureSuites), 0,
+		"test precondition: tls.InsecureCipherSuites() should return at least one suite")
+}
+
+func TestSupportedCipherSuites_IncludesOnlySecure(t *testing.T) {
+	secureSuites := tls.CipherSuites()
+	secureNames := make(map[string]bool)
+	for _, suite := range secureSuites {
+		secureNames[suite.Name] = true
+	}
+
+	for name := range supportedCipherSuites {
+		t.Run(name, func(t *testing.T) {
+			assert.True(t, secureNames[name],
+				"cipher suite %s in supportedCipherSuites must be in tls.CipherSuites() (secure list)", name)
+		})
+	}
+}
+
+func TestOpenSSLToIANACipherSuites_RejectsDeprecated(t *testing.T) {
+	deprecatedCiphers := []string{
+		"DES-CBC3-SHA",
+		"AES128-SHA",
+		"AES256-SHA",
+		"ECDHE-ECDSA-AES128-SHA",
+		"ECDHE-RSA-AES128-SHA",
+		"ECDHE-ECDSA-AES256-SHA",
+		"ECDHE-RSA-AES256-SHA",
+		"ECDHE-ECDSA-AES128-SHA256",
+		"ECDHE-RSA-AES128-SHA256",
+		"AES128-GCM-SHA256",
+		"AES256-GCM-SHA384",
+		"AES128-SHA256",
+	}
+
+	for _, cipher := range deprecatedCiphers {
+		t.Run(cipher, func(t *testing.T) {
+			result := openSSLToIANACipherSuites([]string{cipher})
+			assert.Empty(t, result,
+				"deprecated cipher %s must not map to any IANA name (CWE-327)", cipher)
+		})
+	}
+}
