@@ -146,17 +146,20 @@ func InitLogger(verbosity int) {
 }
 
 // metricsHandler builds the /metrics handler. When secureMetrics is true it
-// obtains a Kubernetes authenticator via newAuth and wraps the handler with
-// bearer-token auth middleware; when false it returns the unauthenticated
-// Prometheus handler. newAuth is injected so tests can supply a fake.
-func metricsHandler(secureMetrics bool, newAuth func() (*auth.KubeAuthenticator, error)) (http.Handler, error) {
+// obtains a Kubernetes authenticator and wraps the handler with bearer-token
+// auth middleware; when false it returns the unauthenticated Prometheus handler.
+func metricsHandler(secureMetrics bool, cacheTTL time.Duration, audience string) (http.Handler, error) {
 	handler := http.Handler(promhttp.Handler())
 	if secureMetrics {
-		authenticator, err := newAuth()
+		authenticator, err := auth.NewKubeAuthenticator(cacheTTL, audience)
 		if err != nil {
 			return nil, err
 		}
-		log.Info("metrics endpoint secured with bearer token authentication")
+		if cacheTTL > 0 {
+			log.Info("metrics endpoint secured with bearer token authentication and caching", "authCacheTTL", cacheTTL, "audience", audience)
+		} else {
+			log.Info("metrics endpoint secured with bearer token authentication (caching disabled)", "audience", audience)
+		}
 		handler = auth.AuthMiddleware(authenticator, handler)
 	}
 	return handler, nil
@@ -174,6 +177,8 @@ func main() {
 		secureMetrics     bool
 		groups            string
 		reconcileInterval time.Duration
+		authCacheTTL      time.Duration
+		audience          string
 	)
 	flag.StringVar(&dir, "dir", logDir, "Directory containing log files")
 	flag.IntVar(&verbosity, "verbosity", 0, "set verbosity level")
@@ -186,6 +191,10 @@ func main() {
 	flag.StringVar(&groups, "groups", "", "TLS groups/curves to use for key exchange (e.g. X25519,secp256r1,secp384r1)")
 	flag.DurationVar(&reconcileInterval, "reconcileInterval", 5*time.Minute,
 		"interval for full disk reconcile to prune stale metrics; 0 disables the timer")
+	flag.DurationVar(&authCacheTTL, "authCacheTTL", 10*time.Second,
+		"TTL for caching TokenReview and SubjectAccessReview results; 0 disables caching")
+	flag.StringVar(&audience, "audience", "",
+		"audience for TokenReview requests; empty string disables audience scoping")
 	flag.Parse()
 
 	InitLogger(verbosity)
@@ -262,7 +271,7 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 		TLSNextProto:      make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disable HTTP/2
 	}
-	handler, err := metricsHandler(secureMetrics, auth.NewKubeAuthenticator)
+	handler, err := metricsHandler(secureMetrics, authCacheTTL, audience)
 	if err != nil {
 		log.Error(err, "failed to create authenticator")
 		os.Exit(1)

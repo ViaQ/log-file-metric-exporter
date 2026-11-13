@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
 
 	log "github.com/ViaQ/logerr/v2/log/static"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -12,18 +13,32 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// Authenticator validates bearer tokens and checks authorization.
+type Authenticator interface {
+	Authenticate(ctx context.Context, token string) (*authenticationv1.TokenReviewStatus, error)
+	Authorize(ctx context.Context, username string, groups []string, verb string, path string) (bool, string, error)
+}
+
 // KubeAuthenticator validates bearer tokens and checks authorization
 // using the Kubernetes TokenReview and SubjectAccessReview APIs.
 type KubeAuthenticator struct {
 	clientset kubernetes.Interface
+	audience  string
 }
 
 // NewKubeAuthenticator creates a KubeAuthenticator using in-cluster configuration.
 // The in-cluster config automatically handles SA token rotation and API server CA.
-func NewKubeAuthenticator() (*KubeAuthenticator, error) {
+// audience specifies the audience for TokenReview requests; empty string disables audience scoping.
+// If cacheTTL > 0, returns a CachedAuthenticator wrapper with the specified TTL.
+func NewKubeAuthenticator(cacheTTL time.Duration, audience string) (Authenticator, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get in-cluster config: %w", err)
+	}
+
+	if cacheTTL > 0 {
+		config.QPS = 20
+		config.Burst = 30
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
@@ -31,22 +46,30 @@ func NewKubeAuthenticator() (*KubeAuthenticator, error) {
 		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
-	return &KubeAuthenticator{clientset: clientset}, nil
+	auth := &KubeAuthenticator{clientset: clientset, audience: audience}
+
+	if cacheTTL > 0 {
+		return NewCachedAuthenticator(auth, cacheTTL), nil
+	}
+
+	return auth, nil
 }
 
 // NewKubeAuthenticatorWithClient creates a KubeAuthenticator with the provided clientset.
 // This is primarily used for testing.
-func NewKubeAuthenticatorWithClient(clientset kubernetes.Interface) *KubeAuthenticator {
-	return &KubeAuthenticator{clientset: clientset}
+func NewKubeAuthenticatorWithClient(audience string, clientset kubernetes.Interface) *KubeAuthenticator {
+	return &KubeAuthenticator{clientset: clientset, audience: audience}
 }
 
 // Authenticate validates a bearer token by submitting a TokenReview to the Kubernetes API.
 // Returns the authenticated user info on success, or an error if the token is invalid.
 func (a *KubeAuthenticator) Authenticate(ctx context.Context, token string) (*authenticationv1.TokenReviewStatus, error) {
+	spec := authenticationv1.TokenReviewSpec{Token: token}
+	if a.audience != "" {
+		spec.Audiences = []string{a.audience}
+	}
 	review, err := a.clientset.AuthenticationV1().TokenReviews().Create(ctx, &authenticationv1.TokenReview{
-		Spec: authenticationv1.TokenReviewSpec{
-			Token: token,
-		},
+		Spec: spec,
 	}, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("token review failed: %w", err)
