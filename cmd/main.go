@@ -115,6 +115,36 @@ func parseTLSGroups(groupNames []string) []tls.CurveID {
 	return curvePreferences
 }
 
+// resolveTLSMinVersion looks up the requested minimum TLS version. If the
+// version is unsupported (e.g. VersionTLS10/VersionTLS11 from an OpenShift
+// Old TLS profile), it logs a warning and falls back to fallback rather than
+// failing startup, so the exporter does not crash-loop on legacy clusters.
+func resolveTLSMinVersion(tlsMinVersion string, fallback uint16) uint16 {
+	version, found := supportedTlsVersions[tlsMinVersion]
+	if !found {
+		log.Error(errors.New("unsupported TLS version, using minimum supported version TLS 1.2"),
+			"ignoring unsupported TLS version, using minimum supported version TLS 1.2", "tlsMinVersion", tlsMinVersion)
+		return fallback
+	}
+	return version
+}
+
+// resolveCipherSuites translates OpenSSL cipher names to Go cipher suite IDs.
+// If every requested cipher is unsupported, it returns nil (not an empty
+// slice) so the caller can leave tls.Config.CipherSuites unset and let Go
+// fall back to its secure defaults rather than disabling all ciphers.
+func resolveCipherSuites(cipherSuites string) []uint16 {
+	ianaNames := openSSLToIANACipherSuites(strings.Split(cipherSuites, ","))
+	cipherSuiteIds := make([]uint16, 0, len(ianaNames))
+	for _, suiteName := range ianaNames {
+		cipherSuiteIds = append(cipherSuiteIds, supportedCipherSuites[suiteName])
+	}
+	if len(cipherSuiteIds) == 0 {
+		return nil
+	}
+	return cipherSuiteIds
+}
+
 func InitLogger(verbosity int) {
 	logger := logv2.NewLogger("log-file-metric-exporter", logv2.WithVerbosity(verbosity))
 	log.SetLogger(logger)
@@ -191,29 +221,12 @@ func main() {
 
 	tlsMinVersion = strings.TrimSpace(tlsMinVersion)
 	if tlsMinVersion != "" {
-		tlsMinVersionNum, found := supportedTlsVersions[tlsMinVersion]
-		if !found {
-			log.Error(errors.New("invalid minimal TLS version"), "invalid minimal TLS version", "tlsMinVersion", tlsMinVersion)
-			os.Exit(1)
-		}
-		tlsConfig.MinVersion = tlsMinVersionNum
+		tlsConfig.MinVersion = resolveTLSMinVersion(tlsMinVersion, tlsConfig.MinVersion)
 	}
 
 	cipherSuites = strings.TrimSpace(cipherSuites)
 	if cipherSuites != "" {
-		ianaNames := openSSLToIANACipherSuites(strings.Split(cipherSuites, ","))
-		cipherSuiteIds := make([]uint16, 0, len(ianaNames))
-		for _, suiteName := range ianaNames {
-			suiteId, found := supportedCipherSuites[suiteName]
-			if !found {
-				log.Error(errors.New("unsupported cipher suite"), "unsupported cipher suite", "cipherSuite", suiteName)
-			} else {
-				cipherSuiteIds = append(cipherSuiteIds, suiteId)
-			}
-		}
-		if len(cipherSuiteIds) > 0 {
-			tlsConfig.CipherSuites = cipherSuiteIds
-		}
+		tlsConfig.CipherSuites = resolveCipherSuites(cipherSuites)
 	}
 
 	// TLS Curves Support

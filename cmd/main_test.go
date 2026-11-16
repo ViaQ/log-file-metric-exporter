@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -313,26 +312,39 @@ func TestOpenSSLToIANACipherSuites_RejectsDeprecated(t *testing.T) {
 	}
 }
 
-func TestCipherSuiteAssignment_AllDeprecatedRemains_NilWhenEmpty(t *testing.T) {
-	tlsConfig := tls.Config{
-		MinVersion: tls.VersionTLS12,
+func TestResolveCipherSuites_AllDeprecatedReturnsNil(t *testing.T) {
+	result := resolveCipherSuites("DES-CBC3-SHA,AES128-SHA,AES256-SHA")
+
+	assert.Nil(t, result,
+		"when all requested ciphers are deprecated, resolveCipherSuites must return nil so Go falls back to secure defaults")
+}
+
+func TestResolveCipherSuites_MixOfValidAndDeprecated(t *testing.T) {
+	result := resolveCipherSuites("DES-CBC3-SHA,ECDHE-RSA-AES128-GCM-SHA256")
+
+	assert.Equal(t, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}, result)
+}
+
+func TestResolveTLSMinVersion_UnsupportedFallsBackToFloor(t *testing.T) {
+	result := resolveTLSMinVersion("VersionTLS10", tls.VersionTLS12)
+
+	assert.Equal(t, uint16(tls.VersionTLS12), result,
+		"unsupported TLS version (e.g. VersionTLS10 from an Old TLS profile) must clamp to the fallback, not crash the process")
+}
+
+func TestResolveTLSMinVersion_SecureVersionsAccepted(t *testing.T) {
+	tests := []struct {
+		version string
+		expect  uint16
+	}{
+		{"VersionTLS12", tls.VersionTLS12},
+		{"VersionTLS13", tls.VersionTLS13},
 	}
 
-	cipherInput := "DES-CBC3-SHA,AES128-SHA,AES256-SHA"
-	ianaNames := openSSLToIANACipherSuites(strings.Split(cipherInput, ","))
-	cipherSuiteIds := make([]uint16, 0, len(ianaNames))
-	for _, suiteName := range ianaNames {
-		suiteId, found := supportedCipherSuites[suiteName]
-		if !found {
-			continue
-		}
-		cipherSuiteIds = append(cipherSuiteIds, suiteId)
+	for _, tc := range tests {
+		t.Run(tc.version, func(t *testing.T) {
+			result := resolveTLSMinVersion(tc.version, tls.VersionTLS12)
+			assert.Equal(t, tc.expect, result)
+		})
 	}
-
-	if len(cipherSuiteIds) > 0 {
-		tlsConfig.CipherSuites = cipherSuiteIds
-	}
-
-	assert.Nil(t, tlsConfig.CipherSuites,
-		"when all requested ciphers are deprecated, CipherSuites must remain nil so Go falls back to secure defaults")
 }

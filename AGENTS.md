@@ -211,10 +211,10 @@ make test-container-local
 As of this version, the exporter enforces strict TLS security to comply with CWE-327 (Use of Broken or Risky Cryptographic Algorithm).
 
 ### Supported TLS Versions
-- **TLS 1.2 and TLS 1.3 only**. TLS 1.0 and 1.1 are explicitly rejected.
+- **TLS 1.2 and TLS 1.3 only** are explicitly configured; TLS 1.0 and 1.1 are not supported.
 - The `supportedTlsVersions` map contains only `VersionTLS12` and `VersionTLS13`
-- Unknown versions trigger startup failure (`os.Exit(1)`)
-- Explicit `MinVersion: tls.VersionTLS12` on `tls.Config` prevents fallback to weaker versions
+- Unsupported versions (e.g., `-tlsMinVersion=VersionTLS10` from Old TLS profiles) are logged as a warning and the server uses `MinVersion: tls.VersionTLS12` instead; this allows graceful degradation rather than crash-loops
+- Explicit `MinVersion: tls.VersionTLS12` on `tls.Config` enforces the hardening floor
 
 ### Supported Cipher Suites
 - **AEAD ciphers only**: AES-GCM and ChaCha20-Poly1305 with ECDHE key exchange
@@ -227,14 +227,14 @@ As of this version, the exporter enforces strict TLS security to comply with CWE
 ### Impact on Kubernetes TLS Profiles
 When deployed via the Cluster Logging Operator, the exporter interacts with OpenShift TLS profiles:
 - **Intermediate** and **Modern** profiles: Fully supported; no breaking changes
-- **Old** profile: TLS 1.0/1.1 requests will be upgraded to TLS 1.2; insecure ciphers (CBC, 3DES, SHA-1 MAC) are rejected and filtered out. If the profile lists only insecure ciphers, the server falls back to Go's secure defaults. Monitoring clients must support TLS 1.2+ with AEAD ciphers
+- **Old** profile: The cluster's `VersionTLS10` minimum is logged as unsupported and clamped to `VersionTLS12`; insecure ciphers (CBC, 3DES, SHA-1 MAC) are filtered out, and the server falls back to Go's secure AEAD defaults. Monitoring clients must support TLS 1.2+ with AEAD ciphers
 - **Custom** profiles: Only ciphers matching the secure OpenSSL-to-IANA mapping are accepted; if none match, Go's secure defaults apply
 
 ### Deployment Guidance
 If scraper clients (Prometheus, Grafana, etc.) are unable to connect after upgrade:
 - **Error**: "protocol version not supported" or "no shared cipher suites"
 - **Resolution**: Upgrade scraper clients to support TLS 1.2+ (standard since ~2015)
-- Consult [CONTRIBUTING.md](CONTRIBUTING.md) for TLS configuration details
+- **Configuration**: Use `-tlsMinVersion` (e.g., `VersionTLS12`, `VersionTLS13`) and `-cipherSuites` (comma-separated OpenSSL names like `ECDHE-RSA-AES256-GCM-SHA384`) to override defaults; unsupported values are logged and ignored
 
 ## When to Update This File
 
