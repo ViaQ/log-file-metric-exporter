@@ -211,7 +211,9 @@ func main() {
 				cipherSuiteIds = append(cipherSuiteIds, suiteId)
 			}
 		}
-		tlsConfig.CipherSuites = cipherSuiteIds
+		if len(cipherSuiteIds) > 0 {
+			tlsConfig.CipherSuites = cipherSuiteIds
+		}
 	}
 
 	// TLS Curves Support

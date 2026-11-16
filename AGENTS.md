@@ -212,22 +212,23 @@ As of this version, the exporter enforces strict TLS security to comply with CWE
 
 ### Supported TLS Versions
 - **TLS 1.2 and TLS 1.3 only**. TLS 1.0 and 1.1 are explicitly rejected.
-- The `supportedTlsVersions` map (cmd/main.go:27-30) contains only `VersionTLS12` and `VersionTLS13`
+- The `supportedTlsVersions` map contains only `VersionTLS12` and `VersionTLS13`
 - Unknown versions trigger startup failure (`os.Exit(1)`)
-- Explicit `MinVersion: tls.VersionTLS12` on tls.Config (cmd/main.go:188) prevents fallback to weaker versions
+- Explicit `MinVersion: tls.VersionTLS12` on `tls.Config` prevents fallback to weaker versions
 
 ### Supported Cipher Suites
 - **AEAD ciphers only**: AES-GCM and ChaCha20-Poly1305 with ECDHE key exchange
-- Go's secure ciphers (`tls.CipherSuites()`) are listed in `supportedCipherSuites` map (cmd/main.go:42-50)
-- OpenSSL-named ciphers from Kubernetes profiles are translated via `openSSLToIANACiphersMap` (cmd/main.go:55-68)
+- Go's secure ciphers (`tls.CipherSuites()`) are listed in `supportedCipherSuites` map
+- OpenSSL-named ciphers from Kubernetes profiles are translated via `openSSLToIANACiphersMap`
 - All weak ciphers (CBC mode, 3DES, SHA-1 MACs, non-ECDHE) are permanently excluded
 - Unknown ciphers are logged as errors and excluded from configuration
+- If all requested ciphers are filtered out as insecure, `CipherSuites` is left `nil` (not an empty slice) so Go's TLS defaults apply with secure ciphers
 
 ### Impact on Kubernetes TLS Profiles
 When deployed via the Cluster Logging Operator, the exporter interacts with OpenShift TLS profiles:
 - **Intermediate** and **Modern** profiles: Fully supported; no breaking changes
-- **Old** profile: TLS 1.0/1.1 requests will be upgraded to TLS 1.2; insecure ciphers (CBC, 3DES, SHA-1 MAC) will be silently filtered. Monitoring clients must support TLS 1.2+ with AEAD ciphers
-- **Custom** profiles: Only ciphers matching the secure OpenSSL-to-IANA mapping are accepted
+- **Old** profile: TLS 1.0/1.1 requests will be upgraded to TLS 1.2; insecure ciphers (CBC, 3DES, SHA-1 MAC) are rejected and filtered out. If the profile lists only insecure ciphers, the server falls back to Go's secure defaults. Monitoring clients must support TLS 1.2+ with AEAD ciphers
+- **Custom** profiles: Only ciphers matching the secure OpenSSL-to-IANA mapping are accepted; if none match, Go's secure defaults apply
 
 ### Deployment Guidance
 If scraper clients (Prometheus, Grafana, etc.) are unable to connect after upgrade:

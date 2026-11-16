@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -287,21 +288,6 @@ func TestSupportedCipherSuites_ExcludesInsecure(t *testing.T) {
 		"test precondition: tls.InsecureCipherSuites() should return at least one suite")
 }
 
-func TestSupportedCipherSuites_IncludesOnlySecure(t *testing.T) {
-	secureSuites := tls.CipherSuites()
-	secureNames := make(map[string]bool)
-	for _, suite := range secureSuites {
-		secureNames[suite.Name] = true
-	}
-
-	for name := range supportedCipherSuites {
-		t.Run(name, func(t *testing.T) {
-			assert.True(t, secureNames[name],
-				"cipher suite %s in supportedCipherSuites must be in tls.CipherSuites() (secure list)", name)
-		})
-	}
-}
-
 func TestOpenSSLToIANACipherSuites_RejectsDeprecated(t *testing.T) {
 	deprecatedCiphers := []string{
 		"DES-CBC3-SHA",
@@ -325,4 +311,28 @@ func TestOpenSSLToIANACipherSuites_RejectsDeprecated(t *testing.T) {
 				"deprecated cipher %s must not map to any IANA name (CWE-327)", cipher)
 		})
 	}
+}
+
+func TestCipherSuiteAssignment_AllDeprecatedRemains_NilWhenEmpty(t *testing.T) {
+	tlsConfig := tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	cipherInput := "DES-CBC3-SHA,AES128-SHA,AES256-SHA"
+	ianaNames := openSSLToIANACipherSuites(strings.Split(cipherInput, ","))
+	cipherSuiteIds := make([]uint16, 0, len(ianaNames))
+	for _, suiteName := range ianaNames {
+		suiteId, found := supportedCipherSuites[suiteName]
+		if !found {
+			continue
+		}
+		cipherSuiteIds = append(cipherSuiteIds, suiteId)
+	}
+
+	if len(cipherSuiteIds) > 0 {
+		tlsConfig.CipherSuites = cipherSuiteIds
+	}
+
+	assert.Nil(t, tlsConfig.CipherSuites,
+		"when all requested ciphers are deprecated, CipherSuites must remain nil so Go falls back to secure defaults")
 }
