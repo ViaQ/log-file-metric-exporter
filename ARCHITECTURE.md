@@ -187,7 +187,7 @@ The exporter supports both standard and custom TLS configurations:
 OpenSSL names are mapped to IANA names. For example:
 ```bash
 ./log-file-metric-exporter \
-  -cipherSuites="ECDHE-RSA-AES128-GCM-SHA256,AES256-GCM-SHA384"
+  -cipherSuites="ECDHE-RSA-AES128-GCM-SHA256,ECDHE-RSA-AES256-GCM-SHA384"
 ```
 
 The `openSSLToIANACiphersMap` in `cmd/main.go` handles the translation.

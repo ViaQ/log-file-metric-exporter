@@ -257,3 +257,144 @@ func TestSecureMetricsDefaultsTrue(t *testing.T) {
 	assert.True(t, defaultSecureMetrics,
 		"secureMetrics must default to true so the exporter is fail-closed (LOG-9761)")
 }
+
+func TestSupportedTLSVersions_RejectsDeprecated(t *testing.T) {
+	deprecatedVersions := map[string]uint16{
+		"VersionTLS10": tls.VersionTLS10,
+		"VersionTLS11": tls.VersionTLS11,
+	}
+
+	for name, version := range deprecatedVersions {
+		t.Run(name, func(t *testing.T) {
+			_, found := supportedTlsVersions[name]
+			assert.False(t, found,
+				"TLS version %s (0x%04x) must not be in supportedTlsVersions (CWE-327)", name, version)
+		})
+	}
+}
+
+func TestSupportedTLSVersions_AcceptsSecure(t *testing.T) {
+	secureVersions := map[string]uint16{
+		"VersionTLS12": tls.VersionTLS12,
+		"VersionTLS13": tls.VersionTLS13,
+	}
+
+	for name, expectedVersion := range secureVersions {
+		t.Run(name, func(t *testing.T) {
+			actualVersion, found := supportedTlsVersions[name]
+			assert.True(t, found, "secure TLS version %s must be supported", name)
+			assert.Equal(t, expectedVersion, actualVersion)
+		})
+	}
+}
+
+func TestSupportedCipherSuites_ExcludesInsecure(t *testing.T) {
+	insecureSuites := tls.InsecureCipherSuites()
+	for _, suite := range insecureSuites {
+		t.Run(suite.Name, func(t *testing.T) {
+			_, found := supportedCipherSuites[suite.Name]
+			assert.False(t, found,
+				"insecure cipher suite %s (0x%04x) must not be in supportedCipherSuites (CWE-327)",
+				suite.Name, suite.ID)
+		})
+	}
+
+	assert.Greater(t, len(insecureSuites), 0,
+		"test precondition: tls.InsecureCipherSuites() should return at least one suite")
+}
+
+func TestOpenSSLToIANACipherSuites_RejectsDeprecated(t *testing.T) {
+	deprecatedCiphers := []string{
+		"DES-CBC3-SHA",
+		"AES128-SHA",
+		"AES256-SHA",
+		"ECDHE-ECDSA-AES128-SHA",
+		"ECDHE-RSA-AES128-SHA",
+		"ECDHE-ECDSA-AES256-SHA",
+		"ECDHE-RSA-AES256-SHA",
+		"ECDHE-ECDSA-AES128-SHA256",
+		"ECDHE-RSA-AES128-SHA256",
+		"AES128-GCM-SHA256",
+		"AES256-GCM-SHA384",
+		"AES128-SHA256",
+	}
+
+	for _, cipher := range deprecatedCiphers {
+		t.Run(cipher, func(t *testing.T) {
+			result := openSSLToIANACipherSuites([]string{cipher})
+			assert.Empty(t, result,
+				"deprecated cipher %s must not map to any IANA name (CWE-327)", cipher)
+		})
+	}
+}
+
+func TestResolveCipherSuites_AllDeprecatedReturnsNil(t *testing.T) {
+	result := resolveCipherSuites("DES-CBC3-SHA,AES128-SHA,AES256-SHA")
+
+	assert.Nil(t, result,
+		"when all requested ciphers are deprecated, resolveCipherSuites must return nil so Go falls back to secure defaults")
+}
+
+func TestResolveCipherSuites_MixOfValidAndDeprecated(t *testing.T) {
+	result := resolveCipherSuites("DES-CBC3-SHA,ECDHE-RSA-AES128-GCM-SHA256")
+
+	assert.Equal(t, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}, result)
+}
+
+func TestResolveCipherSuites_SkipsNameMissingFromSupportedMap(t *testing.T) {
+	// Simulates supportedCipherSuites drifting out of sync with
+	// openSSLToIANACiphersMap (e.g. Go deprecating a suite, or a typo during
+	// map maintenance): the IANA name resolves but has no entry in
+	// supportedCipherSuites. It must be skipped, never silently appended as
+	// cipher ID 0 (TLS_NULL_WITH_NULL_NULL).
+	const missingIANAName = "TLS_DOES_NOT_EXIST"
+	_, alreadyPresent := supportedCipherSuites[missingIANAName]
+	require.False(t, alreadyPresent, "test precondition: fixture name must not already be in supportedCipherSuites")
+
+	openSSLToIANACiphersMap["TEST-ONLY-CIPHER"] = missingIANAName
+	defer delete(openSSLToIANACiphersMap, "TEST-ONLY-CIPHER")
+
+	result := resolveCipherSuites("TEST-ONLY-CIPHER,ECDHE-RSA-AES128-GCM-SHA256")
+
+	assert.Equal(t, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}, result,
+		"a cipher name missing from supportedCipherSuites must be skipped, not appended as 0")
+}
+
+func TestResolveTLSMinVersion_BelowFloorClampsToFallback(t *testing.T) {
+	tests := []string{"VersionTLS10", "VersionTLS11"}
+
+	for _, version := range tests {
+		t.Run(version, func(t *testing.T) {
+			result, err := resolveTLSMinVersion(version, tls.VersionTLS12)
+
+			require.NoError(t, err)
+			assert.Equal(t, uint16(tls.VersionTLS12), result,
+				"known below-floor TLS version %s (e.g. from an Old TLS profile) must clamp to the fallback, not error", version)
+		})
+	}
+}
+
+func TestResolveTLSMinVersion_SecureVersionsAccepted(t *testing.T) {
+	tests := []struct {
+		version string
+		expect  uint16
+	}{
+		{"VersionTLS12", tls.VersionTLS12},
+		{"VersionTLS13", tls.VersionTLS13},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.version, func(t *testing.T) {
+			result, err := resolveTLSMinVersion(tc.version, tls.VersionTLS12)
+			require.NoError(t, err)
+			assert.Equal(t, tc.expect, result)
+		})
+	}
+}
+
+func TestResolveTLSMinVersion_UnknownValueErrors(t *testing.T) {
+	_, err := resolveTLSMinVersion("VersionTLSl3", tls.VersionTLS12)
+
+	assert.Error(t, err,
+		"a genuinely unrecognized -tlsMinVersion (e.g. a typo) must error instead of silently clamping, so misconfiguration fails startup rather than silently weakening policy")
+}
