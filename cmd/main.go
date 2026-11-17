@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -115,18 +116,30 @@ func parseTLSGroups(groupNames []string) []tls.CurveID {
 	return curvePreferences
 }
 
-// resolveTLSMinVersion looks up the requested minimum TLS version. If the
-// version is unsupported (e.g. VersionTLS10/VersionTLS11 from an OpenShift
-// Old TLS profile), it logs a warning and falls back to fallback rather than
-// failing startup, so the exporter does not crash-loop on legacy clusters.
-func resolveTLSMinVersion(tlsMinVersion string, fallback uint16) uint16 {
-	version, found := supportedTlsVersions[tlsMinVersion]
-	if !found {
-		log.Error(errors.New("unsupported TLS version, using minimum supported version TLS 1.2"),
-			"ignoring unsupported TLS version, using minimum supported version TLS 1.2", "tlsMinVersion", tlsMinVersion)
-		return fallback
+// knownBelowFloorTLSVersions are legacy version names that OpenShift's Old
+// TLS profile can pass via -tlsMinVersion. They are below the CWE-327
+// hardening floor and are clamped rather than rejected, so the exporter does
+// not crash-loop on clusters still using that profile.
+var knownBelowFloorTLSVersions = map[string]bool{
+	"VersionTLS10": true,
+	"VersionTLS11": true,
+}
+
+// resolveTLSMinVersion looks up the requested minimum TLS version. Known
+// below-floor versions are clamped to fallback with a warning. Any other
+// unrecognized value is reported as an error rather than silently clamped,
+// so a typo (e.g. "VersionTLSl3") fails startup instead of silently
+// downgrading the effective policy.
+func resolveTLSMinVersion(tlsMinVersion string, fallback uint16) (uint16, error) {
+	if version, found := supportedTlsVersions[tlsMinVersion]; found {
+		return version, nil
 	}
-	return version
+	if knownBelowFloorTLSVersions[tlsMinVersion] {
+		log.Info("TLS version below the supported floor; clamping to minimum supported version",
+			"tlsMinVersion", tlsMinVersion, "clampedTo", fallback)
+		return fallback, nil
+	}
+	return 0, fmt.Errorf("unsupported TLS version %q", tlsMinVersion)
 }
 
 // resolveCipherSuites translates OpenSSL cipher names to Go cipher suite IDs.
@@ -137,7 +150,11 @@ func resolveCipherSuites(cipherSuites string) []uint16 {
 	ianaNames := openSSLToIANACipherSuites(strings.Split(cipherSuites, ","))
 	cipherSuiteIds := make([]uint16, 0, len(ianaNames))
 	for _, suiteName := range ianaNames {
-		cipherSuiteIds = append(cipherSuiteIds, supportedCipherSuites[suiteName])
+		if suiteId, found := supportedCipherSuites[suiteName]; found {
+			cipherSuiteIds = append(cipherSuiteIds, suiteId)
+		} else {
+			log.Error(errors.New("unsupported cipher suite"), "skipping cipher suite", "cipherSuite", suiteName)
+		}
 	}
 	if len(cipherSuiteIds) == 0 {
 		return nil
@@ -221,7 +238,12 @@ func main() {
 
 	tlsMinVersion = strings.TrimSpace(tlsMinVersion)
 	if tlsMinVersion != "" {
-		tlsConfig.MinVersion = resolveTLSMinVersion(tlsMinVersion, tlsConfig.MinVersion)
+		version, err := resolveTLSMinVersion(tlsMinVersion, tlsConfig.MinVersion)
+		if err != nil {
+			log.Error(err, "invalid minimal TLS version", "tlsMinVersion", tlsMinVersion)
+			os.Exit(1)
+		}
+		tlsConfig.MinVersion = version
 	}
 
 	cipherSuites = strings.TrimSpace(cipherSuites)
